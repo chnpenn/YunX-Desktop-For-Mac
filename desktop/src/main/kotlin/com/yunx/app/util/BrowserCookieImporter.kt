@@ -5,6 +5,7 @@ import com.yunx.app.AppContext
 import java.io.File
 import java.sql.DriverManager
 import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -165,7 +166,7 @@ object BrowserCookieImporter {
             val copy = File(AppContext.cacheDir, "browser-cookies-${System.nanoTime()}.db")
             try {
                 cookiesFile.copyTo(copy, overwrite = true)
-                val cookie = extractChromium(copy, domains) ?: continue
+                val cookie = extractChromium(browser, copy, domains) ?: continue
                 return FoundCookies(browser.displayName, cookie, cookie.split(';').size)
             } catch (e: Exception) {
                 Log.w(TAG, "读取 ${browser.displayName} Cookie 失败: ${e.message}")
@@ -176,7 +177,7 @@ object BrowserCookieImporter {
         return null
     }
 
-    private fun extractChromium(dbFile: File, domains: List<String>): String? {
+    private fun extractChromium(browser: BrowserInfo, dbFile: File, domains: List<String>): String? {
         Class.forName("org.sqlite.JDBC")
         DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { conn ->
             val likeClause = domains.joinToString(" OR ") { "host_key LIKE ?" }
@@ -188,7 +189,7 @@ object BrowserCookieImporter {
                     val pairs = mutableListOf<String>()
                     while (rs.next()) {
                         val name = rs.getString(2)
-                        val value = decryptChromiumValue(rs.getBytes(3)) ?: continue
+                        val value = decryptChromiumValue(browser, rs.getBytes(3)) ?: continue
                         if (name.isNotBlank()) pairs += "$name=$value"
                     }
                     if (pairs.isEmpty()) return null
@@ -206,7 +207,7 @@ object BrowserCookieImporter {
      * - ★ Mac："v10" 前缀 + AES-128-CBC，密钥从 Keychain 的 "<浏览器> Safe Storage" 读取，
      *   PBKDF2（迭代 1003 次）派生；"v20" 同样无法解密，返回 null。
      */
-    private fun decryptChromiumValue(bytes: ByteArray): String? {
+    private fun decryptChromiumValue(browser: BrowserInfo, bytes: ByteArray): String? {
         if (bytes.size < 3) return null
         var offset = 0
         if (bytes[0] == 'v'.code.toByte() &&
@@ -219,7 +220,7 @@ object BrowserCookieImporter {
             offset = 3
         }
         val payload = if (offset > 0) bytes.copyOfRange(offset, bytes.size) else bytes
-        if (isMacOS) return decryptChromiumValueMac(payload)
+        if (isMacOS) return decryptChromiumValueMac(payload, browser.id)
         return runCatching {
             val plain = Crypt32Util.cryptUnprotectData(payload)
             String(plain, Charsets.UTF_8)
@@ -228,52 +229,62 @@ object BrowserCookieImporter {
 
     /**
      * ★ Mac 移植：Chromium mac 加密 Cookie 解密。
-     * 流程：security find-generic-password → Safe Storage 明文密钥(约32字符)
-     * → PBKDF2-HMAC-SHA1(1003 次, 16字节) → AES-128-CBC(IV=载荷前16字节) → 去填充。
+     * 流程：security find-generic-password 取 "<浏览器> Safe Storage" 口令
+     * → PBKDF2-HMAC-SHA1(迭代 1003, 盐="saltysalt", 16字节密钥)
+     * → AES-128-CBC，IV 固定为 16 个空格(0x20)，密文 PKCS#5 去填充。
+     * （这是 Chromium os_crypt 在 mac 上的既定方案，v10 载荷去掉 3 字节前缀后即是密文）
      * 首次调用 macOS 会弹 Keychain 授权框，用户允许后同一应用不再重复询问。
      */
-    private fun decryptChromiumValueMac(payload: ByteArray): String? {
-        val passphrase = keychainPassphrase() ?: return null
+    private fun decryptChromiumValueMac(payload: ByteArray, browserId: String): String? {
+        val passphrase = keychainPassphrase(browserId) ?: return null
+        if (payload.size <= 16) return null
         return runCatching {
             val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
             val spec = javax.crypto.spec.PBEKeySpec(passphrase.toCharArray(), SALT, 1003, 128)
             val key = factory.generateSecret(spec).encoded
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"))
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(ByteArray(16) { ' '.code.toByte() }))
             val plain = cipher.doFinal(payload)
             String(plain, Charsets.UTF_8)
         }.getOrNull()
     }
 
-    /** Chromium mac AES 密钥派生用的固定盐（与上游实现一致） */
-    private val SALT = byteArrayOf(
-        's'.code.toByte(), 'a'.code.toByte(), 'l'.code.toByte(), 't'.code.toByte(),
-        'y'.code.toByte(), ' '.code.toByte(), 's'.code.toByte(), 'e'.code.toByte(),
-        'a'.code.toByte(), ' '.code.toByte()
+    /** Chromium mac AES 密钥派生固定盐："saltysalt"（os_crypt_mac.mm 里写死的 9 字节） */
+    private val SALT = "saltysalt".toByteArray(Charsets.US_ASCII)
+
+    /** 各浏览器 Keychain 的服务名/账户名映射（Chromium 按浏览器品牌写入不同条目） */
+    private val MAC_KEYCHAIN_NAMES: Map<String, Pair<String, String>> = mapOf(
+        "chromium-Chrome" to ("Chrome" to "Chrome Safe Storage"),
+        "chromium-Edge" to ("Microsoft Edge" to "Microsoft Edge Safe Storage"),
+        "chromium-Brave" to ("Brave" to "Brave Safe Storage"),
+        "chromium-Vivaldi" to ("Vivaldi" to "Vivaldi Safe Storage"),
+        "chromium-Opera" to ("Opera" to "Opera Safe Storage"),
+        "chromium-Arc" to ("Arc" to "Arc Safe Storage")
     )
 
-    /** 从 Keychain 读取 Safe Storage 口令（缓存结果；读取失败返回 null，解密全部跳过） */
-    @Volatile
-    private var cachedPassphrase: String? = null
-    @Volatile
-    private var passphraseTried = false
+    /** 从 Keychain 读取 Safe Storage 口令（按浏览器分缓存；读取失败返回 null，该浏览器的解密全部跳过） */
+    private val passphraseCache = HashMap<String, String?>()
 
-    private fun keychainPassphrase(): String? {
-        if (passphraseTried) return cachedPassphrase
-        synchronized(this) {
-            if (passphraseTried) return cachedPassphrase
-            cachedPassphrase = runCatching {
+    private fun keychainPassphrase(browserId: String): String? {
+        synchronized(passphraseCache) {
+            if (passphraseCache.containsKey(browserId)) return passphraseCache[browserId]
+            val names = MAC_KEYCHAIN_NAMES[browserId]
+                ?: ("Chrome" to "Chrome Safe Storage") // 未知品牌退回 Chrome（不影响发现，只影响解密）
+            val value = runCatching {
                 val pb = ProcessBuilder(
                     "security", "find-generic-password",
-                    "-w", "-a", "Chrome", "-s", "Chrome Safe Storage"
+                    "-w", "-a", names.first, "-s", names.second
                 ).redirectErrorStream(false)
                 val p = pb.start()
                 val out = p.inputStream.bufferedReader().readText().trim()
                 p.waitFor()
                 out.takeIf { p.exitValue() == 0 && it.isNotBlank() }
             }.getOrNull()
-            passphraseTried = true
-            return cachedPassphrase
+            passphraseCache[browserId] = value
+            if (value == null) {
+                Log.w(TAG, "Keychain 读取失败: ${names.second}（用户拒绝或条目不存在），该浏览器 Cookie 将无法解密")
+            }
+            return value
         }
     }
 
