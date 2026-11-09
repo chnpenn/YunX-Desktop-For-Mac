@@ -362,17 +362,28 @@ fun AutoImportCookieButton(
         scope.launch {
             scanning = true
             errorMsg = null
-            val found = withContext(Dispatchers.IO) {
-                val domains = BrowserCookieImporter.domainSuffixes(platform)
-                BrowserCookieImporter.discoverBrowsers().mapNotNull { browser ->
-                    BrowserCookieImporter.importFrom(browser, domains)
+            com.yunx.app.util.Log.i("YunX-Cookie-UI", "scan() 开始 platform=$platform")
+            try {
+                val found = withContext(Dispatchers.IO) {
+                    val domains = BrowserCookieImporter.domainSuffixes(platform)
+                    BrowserCookieImporter.discoverBrowsers()
+                        .also { com.yunx.app.util.Log.i("YunX-Cookie-UI", "发现 ${it.size} 个浏览器: ${it.joinToString { b -> b.id }}") }
+                        .mapNotNull { browser ->
+                            runCatching { BrowserCookieImporter.importFrom(browser, domains) }
+                                .onFailure { com.yunx.app.util.Log.w("YunX-Cookie-UI", "导入 ${browser.id} 异常: ${it.message}") }
+                                .getOrNull()
+                        }
                 }
-            }
-            results = found
-            scanning = false
-            if (found.isEmpty()) {
-                errorMsg = "未在本机浏览器中找到该平台的登录 Cookie。\n" +
-                    "提示：需先在浏览器中登录过对应网盘；Chrome/Edge 较新版本因安全限制可能无法读取，可尝试 Firefox 或 360 浏览器。"
+                results = found
+                scanning = false
+                if (found.isEmpty()) {
+                    errorMsg = "未在本机浏览器中找到该平台的登录 Cookie。\n" +
+                        "提示：需先在浏览器中登录过对应网盘；Chrome/Edge 较新版本因安全限制可能无法读取，可尝试 Firefox 或 360 浏览器。"
+                }
+            } catch (t: Throwable) {
+                com.yunx.app.util.Log.e("YunX-Cookie-UI", "scan() 整体异常", t)
+                scanning = false
+                errorMsg = "导入过程异常：${t.message ?: t.javaClass.simpleName}"
             }
         }
     }
