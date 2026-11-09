@@ -303,3 +303,23 @@ compose.desktop {
         }
     }
 }
+
+// ★ Mac 移植：packageDmg 完成后自动把 DMG 复制一份到「下载」目录，方便直接安装/分发。
+// 只在 macOS 上跑；用户目录无 Downloads 时静默跳过（不影响打包本身）。
+val copyDmgToDownloads by tasks.registering {
+    val dmgDir = layout.buildDirectory.dir("compose/binaries/main/dmg")
+    val version = appVersion
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!System.getProperty("os.name", "").lowercase().contains("mac")) return@doLast
+        val dmg = dmgDir.get().asFile.resolve("YunX-Desktop-$version.dmg")
+        if (!dmg.isFile) return@doLast
+        val downloads = File(System.getProperty("user.home"), "Downloads")
+        if (!downloads.isDirectory) return@doLast
+        dmg.copyTo(File(downloads, dmg.name), overwrite = true)
+        println("DMG 已复制到: ${File(downloads, dmg.name).absolutePath}")
+    }
+}
+tasks.matching { it.name == "packageDmg" || it.name == "packageDistributionForCurrentOS" }.configureEach {
+    finalizedBy(copyDmgToDownloads)
+}
