@@ -265,7 +265,9 @@ compose.desktop {
     application {
         mainClass = "com.yunx.app.MainKt"
         // ★ Mac 移植：JCEF 的 mac 层（CefBrowserWindowMac 等）要访问 JDK 内部 API，
-        //   缺这些参数会每帧抛 IllegalAccessError（sun.awt.AWTAccessor 不可访问），内嵌浏览器无法渲染。
+        //   缺这些参数会每帧抛 IllegalAccessError，内嵌浏览器无法渲染。
+        //   sun.awt.AWTAccessor 在窗口创建路径用到；sun.lwawt（LWComponentPeer）在
+        //   浏览器组件 addNotify / getWindowHandle 路径用到（登录页才触发，冒烟期容易漏测）。
         //   Windows 发布包由启动器注入等效参数；这些 flag 对所有 JDK 9+ 平台均合法，统一声明即可。
         jvmArgs(
             "--add-exports", "java.base/sun.security.action=ALL-UNNAMED",
@@ -274,6 +276,8 @@ compose.desktop {
             "--add-opens", "java.desktop/java.awt=ALL-UNNAMED",
             "--add-opens", "java.desktop/sun.awt=ALL-UNNAMED",
             "--add-opens", "java.desktop/sun.awt.shell=ALL-UNNAMED",
+            "--add-opens", "java.desktop/sun.lwawt=ALL-UNNAMED",
+            "--add-opens", "java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
             "--add-opens", "java.desktop/com.sun.imageio=ALL-UNNAMED",
         )
         nativeDistributions {
