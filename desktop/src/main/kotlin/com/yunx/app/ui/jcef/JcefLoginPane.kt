@@ -395,11 +395,46 @@ fun AutoImportCookieButton(
     }
 
     if (show) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!scanning) show = false },
-            title = { Text("自动导入浏览器 Cookie") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // ★ Mac 移植：登录页的 JCEF 画布是重量级 SwingPanel（原生子窗口），mac 上会浮在
+        //   Compose 内容之上，普通 AlertDialog 会被浏览器整个盖住（点击导入后「看起来没反应」，
+        //   实际对话框已弹出但埋在浏览器底下）。改用独立置顶窗口（参照 BrowserHookDialogWindow），
+        //   与主窗口平级、alwaysOnTop，任何平台都能弹到最前。
+        androidx.compose.ui.window.Window(
+            onCloseRequest = { if (!scanning) show = false },
+            title = "自动导入浏览器 Cookie",
+            undecorated = true,
+            resizable = false,
+            alwaysOnTop = true,
+            state = androidx.compose.ui.window.rememberWindowState(
+                size = androidx.compose.ui.unit.DpSize(460.dp, 320.dp),
+                position = androidx.compose.ui.window.WindowPosition(Alignment.Center)
+            )
+        ) {
+            val win = this.window
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                while (true) {
+                    if (win.width > 0 && win.height > 0) {
+                        runCatching {
+                            win.shape = java.awt.geom.RoundRectangle2D.Float(
+                                0f, 0f, win.width.toFloat(), win.height.toFloat(), 24f, 24f
+                            )
+                        }
+                        break
+                    }
+                    kotlinx.coroutines.delay(50)
+                }
+            }
+            com.yunx.app.ui.theme.ComposeEmptyActivityTheme {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "自动导入浏览器 Cookie",
+                        style = MaterialTheme.typography.titleMedium
+                    )
                     if (scanning) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -441,7 +476,8 @@ fun AutoImportCookieButton(
                                                     errorMsg = "该 Cookie 校验失败（可能已过期），请重新登录浏览器后重试"
                                                 }
                                             }
-                                        }
+                                        },
+                                        enabled = !scanning
                                     ) { Text("导入") }
                                 }
                             }
@@ -453,14 +489,14 @@ fun AutoImportCookieButton(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Spacer(modifier = Modifier.weight(1f))
+                    androidx.compose.material3.TextButton(
+                        onClick = { if (!scanning) show = false },
+                        enabled = !scanning,
+                        modifier = Modifier.align(Alignment.End)
+                    ) { Text("关闭") }
                 }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = { if (!scanning) show = false },
-                    enabled = !scanning
-                ) { Text("关闭") }
             }
-        )
+        }
     }
 }
