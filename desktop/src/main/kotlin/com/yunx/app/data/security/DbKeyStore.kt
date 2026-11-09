@@ -211,11 +211,37 @@ object DbKeyStore {
         append(System.getProperty("os.name").orEmpty()).append('|')
         append(System.getProperty("os.arch").orEmpty()).append('|')
         append(
-            machineGuid() ?: throw MachineFingerprintUnavailable(
+            // ★ Mac 移植：mac 读 IOPlatformUUID（IOService 平台 UUID，机器唯一、语义与 MachineGuid
+            //   对位）；读不到仍走「暂时不可用」保护，绝不静默换指纹（否则会误判密钥损坏导致凭证丢失）
+            if (isMac()) macPlatformUuid() ?: machineGuid() ?: throw MachineFingerprintUnavailable(
+                "暂时读不到机器指纹，本次不做密钥解包（下次会重试）"
+            )
+            else machineGuid() ?: throw MachineFingerprintUnavailable(
                 "暂时读不到 MachineGuid，本次不做密钥解包（下次会重试）"
             )
         )
     }
+
+    /** ★ Mac 移植：IOPlatformUUID（ioreg 读取，无需授权，普通用户进程可稳定获取）。
+     *  输出格式随系统而异：旧版 ini 风格 `"IOPlatformUUID" = "…"`，新版 XML plist
+     *  `<key>IOPlatformUUID</key><string>…</string>`，两种都匹配。 */
+    private fun macPlatformUuid(): String? = runCatching {
+        val pb = ProcessBuilder(
+            "ioreg", "-d2", "-a", "-rd1", "-c", "IOPlatformExpertDevice"
+        ).redirectErrorStream(true)
+        val p = pb.start()
+        val out = p.inputStream.bufferedReader().readText()
+        p.waitFor()
+        if (p.exitValue() != 0) return@runCatching null
+        val iniStyle = Regex("\"IOPlatformUUID\"\\s*=\\s*\"([0-9A-Fa-f-]{36})\"").find(out)
+        val xmlStyle = Regex(
+            "<key>IOPlatformUUID</key>\\s*<string>([0-9A-Fa-f-]{36})</string>"
+        ).find(out)
+        (iniStyle ?: xmlStyle)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    private fun isMac(): Boolean =
+        System.getProperty("os.name", "").lowercase().let { it.contains("mac") || it.contains("darwin") }
 
     /** Windows MachineGuid（HKLM\SOFTWARE\Microsoft\Cryptography），普通用户可读 */
     private fun machineGuid(): String? = runCatching {
