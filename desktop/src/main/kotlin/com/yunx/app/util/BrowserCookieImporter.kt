@@ -270,21 +270,30 @@ object BrowserCookieImporter {
             if (passphraseCache.containsKey(browserId)) return passphraseCache[browserId]
             val names = MAC_KEYCHAIN_NAMES[browserId]
                 ?: ("Chrome" to "Chrome Safe Storage") // 未知品牌退回 Chrome（不影响发现，只影响解密）
-            val value = runCatching {
+            val value: String? = runCatching {
                 val pb = ProcessBuilder(
                     "security", "find-generic-password",
                     "-w", "-a", names.first, "-s", names.second
                 ).redirectErrorStream(false)
                 val p = pb.start()
+                // ★ 必须带超时：首次访问 Keychain 时 security 会等用户在授权框点「允许」，
+                //   若授权框被应用窗口遮挡/未能弹出，security 永远不返回 → 导入线程挂死、按钮永远转圈。
+                //   8 秒读不到口令即视为「用户未授权」，明确失败返回（下次点击重试会再弹一次授权）。
                 val out = p.inputStream.bufferedReader().readText().trim()
-                p.waitFor()
-                out.takeIf { p.exitValue() == 0 && it.isNotBlank() }
+                val finished = p.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
+                if (!finished) {
+                    runCatching { p.destroyForcibly() }
+                    Log.w(TAG, "Keychain 读取超时（授权框可能被遮挡）：${names.second}")
+                    null
+                } else {
+                    out.takeIf { p.exitValue() == 0 && it.isNotBlank() }
+                }
             }.getOrNull()
             passphraseCache[browserId] = value
             if (value == null) {
-                Log.w(TAG, "Keychain 读取失败: ${names.second}（用户拒绝或条目不存在），该浏览器 Cookie 将无法解密")
+                Log.w(TAG, "Keychain 读取失败: ${names.second}（用户拒绝/超时/条目不存在），该浏览器 Cookie 将无法解密")
             }
-            return value
+            value
         }
     }
 
