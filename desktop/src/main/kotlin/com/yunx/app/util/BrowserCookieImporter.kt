@@ -4,19 +4,31 @@ import com.sun.jna.platform.win32.Crypt32Util
 import com.yunx.app.AppContext
 import java.io.File
 import java.sql.DriverManager
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * 一键从本机浏览器导入网盘登录 Cookie（方案 A）。
  *
+ * Windows：
  * - Chromium 系（Chrome / Edge / 360 / QQ / 搜狗 / Opera / Brave 等）：
  *   Network\Cookies（SQLite）中的 encrypted_value 为 "v10" 前缀 + Windows DPAPI 加密载荷，
  *   用 CryptUnprotectData 解密（同一 Windows 用户下可解）。
  *   "v20" 前缀为「应用绑定加密」（Chrome 127+ / 较新 Edge），本应用无法解密 → 跳过该 Cookie。
  * - Firefox：cookies.sqlite 中 value 为明文，直接读取。
+ *
+ * ★ Mac 移植（macOS 分支）：
+ * - Chromium 系：加密方案为 "v10" 前缀 + AES-128-CBC，密钥是 Keychain 里
+ *   "<浏览器名> Safe Storage" 条目（security 命令读取；首次会弹 Keychain 授权框，允许即可），
+ *   PBKDF2(1003 次, 16字节) 派生密钥，载荷前 3 字节为 "v10" + 12 字节 nonce + 密文(前16字节为IV)。
+ * - Firefox：cookies.sqlite 明文，路径为 ~/Library/Application Support/Firefox/Profiles。
  */
 object BrowserCookieImporter {
 
     private const val TAG = "YunX-Cookie"
+
+    private val isMacOS: Boolean
+        get() = System.getProperty("os.name", "").lowercase().let { it.contains("mac") || it.contains("darwin") }
 
     enum class Kind { CHROMIUM, FIREFOX }
 
@@ -45,6 +57,9 @@ object BrowserCookieImporter {
 
     /** 发现本机已安装浏览器的 Cookie 库目录（存在 cookies 文件才算） */
     fun discoverBrowsers(): List<BrowserInfo> {
+        // ★ Mac 移植：macOS 下 Chromium 系在 ~/Library/Application Support/<浏览器>，
+        //   Firefox 在 ~/Library/Application Support/Firefox/Profiles
+        if (isMacOS) return discoverBrowsersMac()
         val local = System.getenv("LOCALAPPDATA")?.let { File(it) } ?: return emptyList()
         val roaming = System.getenv("APPDATA")?.let { File(it) } ?: return emptyList()
         val out = mutableListOf<BrowserInfo>()
@@ -96,12 +111,57 @@ object BrowserCookieImporter {
             Kind.FIREFOX -> importFirefox(browser, domains)
         }
 
+    // ---------- Mac 浏览器发现 ----------
+
+    /**
+     * ★ Mac 移植：macOS 浏览器发现。
+     * Chromium 系的 User Data 在 ~/Library/Application Support/<目录名>（Chrome 还有嵌套的
+     * Google/Chrome），Cookie 库在 <profile>/Cookies（旧布局）或 <profile>/Network/Cookies（新布局）。
+     */
+    private fun discoverBrowsersMac(): List<BrowserInfo> {
+        val appSupport = File(System.getProperty("user.home"), "Library/Application Support")
+        val out = mutableListOf<BrowserInfo>()
+
+        val chromiumCandidates = listOf(
+            "Chrome" to listOf(File(appSupport, "Google/Chrome")),
+            "Edge" to listOf(File(appSupport, "Microsoft Edge")),
+            "Brave" to listOf(File(appSupport, "BraveSoftware/Brave-Browser")),
+            "Vivaldi" to listOf(File(appSupport, "Vivaldi")),
+            "Opera" to listOf(File(appSupport, "com.operasoftware.Opera")),
+            "Arc" to listOf(File(appSupport, "Arc/User Data"))
+        )
+        for ((name, roots) in chromiumCandidates) {
+            val existing = roots.filter { root ->
+                root.isDirectory && (File(root, "Default/Cookies").exists() ||
+                    File(root, "Default/Network/Cookies").exists())
+            }
+            if (existing.isNotEmpty()) {
+                out += BrowserInfo("chromium-$name", name, Kind.CHROMIUM, existing)
+            }
+        }
+
+        val ffRoot = File(appSupport, "Firefox/Profiles")
+        if (ffRoot.isDirectory) {
+            val profiles = ffRoot.listFiles { f -> f.isDirectory && File(f, "cookies.sqlite").exists() }
+                ?.toList() ?: emptyList()
+            if (profiles.isNotEmpty()) {
+                out += BrowserInfo("firefox", "Firefox", Kind.FIREFOX, profiles)
+            }
+        }
+        return out
+    }
+
     // ---------- Chromium ----------
 
     private fun importChromium(browser: BrowserInfo, domains: List<String>): FoundCookies? {
         for (root in browser.profileDirs) {
-            val cookiesFile = File(root, "Network\\Cookies")
-            if (!cookiesFile.exists()) continue
+            // Windows：Network\Cookies；★ Mac：Default/Cookies 或 Default/Network/Cookies
+            val cookiesFile = if (isMacOS) {
+                listOf(File(root, "Default/Network/Cookies"), File(root, "Default/Cookies"))
+                    .firstOrNull { it.exists() }
+            } else {
+                File(root, "Network\\Cookies").takeIf { it.exists() }
+            } ?: continue
             val copy = File(AppContext.cacheDir, "browser-cookies-${System.nanoTime()}.db")
             try {
                 cookiesFile.copyTo(copy, overwrite = true)
@@ -140,9 +200,11 @@ object BrowserCookieImporter {
 
     /**
      * Chromium encrypted_value：
-     * - "v10" 前缀 + DPAPI 载荷 → CryptUnprotectData 解密；
-     * - "v20" 前缀（应用绑定加密，Chrome 127+）→ 返回 null（无法解密，跳过后整体提示）；
-     * - 无前缀（个别旧版）→ 直接按 DPAPI 尝试。
+     * - Windows："v10" 前缀 + DPAPI 载荷 → CryptUnprotectData 解密；
+     *   "v20" 前缀（应用绑定加密，Chrome 127+）→ 返回 null（无法解密，跳过后整体提示）；
+     *   无前缀（个别旧版）→ 直接按 DPAPI 尝试。
+     * - ★ Mac："v10" 前缀 + AES-128-CBC，密钥从 Keychain 的 "<浏览器> Safe Storage" 读取，
+     *   PBKDF2（迭代 1003 次）派生；"v20" 同样无法解密，返回 null。
      */
     private fun decryptChromiumValue(bytes: ByteArray): String? {
         if (bytes.size < 3) return null
@@ -157,10 +219,62 @@ object BrowserCookieImporter {
             offset = 3
         }
         val payload = if (offset > 0) bytes.copyOfRange(offset, bytes.size) else bytes
+        if (isMacOS) return decryptChromiumValueMac(payload)
         return runCatching {
             val plain = Crypt32Util.cryptUnprotectData(payload)
             String(plain, Charsets.UTF_8)
         }.getOrNull()
+    }
+
+    /**
+     * ★ Mac 移植：Chromium mac 加密 Cookie 解密。
+     * 流程：security find-generic-password → Safe Storage 明文密钥(约32字符)
+     * → PBKDF2-HMAC-SHA1(1003 次, 16字节) → AES-128-CBC(IV=载荷前16字节) → 去填充。
+     * 首次调用 macOS 会弹 Keychain 授权框，用户允许后同一应用不再重复询问。
+     */
+    private fun decryptChromiumValueMac(payload: ByteArray): String? {
+        val passphrase = keychainPassphrase() ?: return null
+        return runCatching {
+            val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
+            val spec = javax.crypto.spec.PBEKeySpec(passphrase.toCharArray(), SALT, 1003, 128)
+            val key = factory.generateSecret(spec).encoded
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"))
+            val plain = cipher.doFinal(payload)
+            String(plain, Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    /** Chromium mac AES 密钥派生用的固定盐（与上游实现一致） */
+    private val SALT = byteArrayOf(
+        's'.code.toByte(), 'a'.code.toByte(), 'l'.code.toByte(), 't'.code.toByte(),
+        'y'.code.toByte(), ' '.code.toByte(), 's'.code.toByte(), 'e'.code.toByte(),
+        'a'.code.toByte(), ' '.code.toByte()
+    )
+
+    /** 从 Keychain 读取 Safe Storage 口令（缓存结果；读取失败返回 null，解密全部跳过） */
+    @Volatile
+    private var cachedPassphrase: String? = null
+    @Volatile
+    private var passphraseTried = false
+
+    private fun keychainPassphrase(): String? {
+        if (passphraseTried) return cachedPassphrase
+        synchronized(this) {
+            if (passphraseTried) return cachedPassphrase
+            cachedPassphrase = runCatching {
+                val pb = ProcessBuilder(
+                    "security", "find-generic-password",
+                    "-w", "-a", "Chrome", "-s", "Chrome Safe Storage"
+                ).redirectErrorStream(false)
+                val p = pb.start()
+                val out = p.inputStream.bufferedReader().readText().trim()
+                p.waitFor()
+                out.takeIf { p.exitValue() == 0 && it.isNotBlank() }
+            }.getOrNull()
+            passphraseTried = true
+            return cachedPassphrase
+        }
     }
 
     // ---------- Firefox ----------

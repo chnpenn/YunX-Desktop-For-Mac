@@ -25,6 +25,10 @@ object DesktopActions {
     /** FOLDERID_Downloads 的 GUID（注册表兜底读取时使用） */
     private const val DOWNLOADS_FOLDER_GUID = "{374DE290-123F-4565-9164-39C4925E467B}"
 
+    /** ★ Mac 移植：macOS 环境（Finder 相关操作走 `open` 命令） */
+    private val isMacOS: Boolean
+        get() = System.getProperty("os.name", "").lowercase().let { it.contains("mac") || it.contains("darwin") }
+
     /** 复制文本到系统剪贴板 */
     fun copyToClipboard(text: String) {
         runCatching {
@@ -62,6 +66,13 @@ object DesktopActions {
     fun revealFile(path: String): Boolean {
         val file = File(path)
         if (!file.exists()) return false
+        // ★ Mac 移植：`open -R` 在 Finder 中定位并选中文件（路径含空格/中文也安全，ProcessBuilder 原样传参）
+        if (isMacOS) {
+            return runCatching {
+                ProcessBuilder("open", "-R", file.absolutePath).start()
+                true
+            }.getOrDefault(false)
+        }
         if (WindowsTitleBar.isWindows) {
             // 返回 HINSTANCE：> 32 表示成功（<= 32 是错误码），失败再退回命令行方式
             val ret = runCatching {
@@ -82,6 +93,13 @@ object DesktopActions {
     fun openDirectory(path: String): Boolean {
         val dir = File(path)
         if (!dir.isDirectory && !dir.mkdirs()) return false
+        // ★ Mac 移植：`open` 在 Finder 中打开目录
+        if (isMacOS) {
+            return runCatching {
+                ProcessBuilder("open", dir.absolutePath).start()
+                true
+            }.getOrDefault(false)
+        }
         return runCatching {
             ProcessBuilder("explorer.exe", dir.absolutePath).start()
             true
@@ -118,6 +136,20 @@ object DesktopActions {
      * 拿不到启动器 exe（开发运行 `gradle run`）时返回 false，由调用方提示手动重启。
      */
     fun restartApp(): Boolean {
+        // ★ Mac 移植：jpackage 的 .app 用 `open -n` 拉起新副本。
+        //   jpackage.app-path 指向 <包>/Contents/MacOS/<名>，向上两级即 .app 包；
+        //   开发运行（gradle run）拿不到 .app 时返回 false，由调用方提示手动重启。
+        //   延迟 2 秒再启动，等本进程把单实例文件锁/数据库句柄放掉。
+        if (isMacOS) {
+            val appBundle = System.getProperty("jpackage.app-path")?.let { p ->
+                File(p).parentFile?.parentFile?.takeIf { it.isDirectory && it.name.endsWith(".app") }
+            } ?: return false
+            return runCatching {
+                // 路径经 $0 传参，避免 sh -c 字符串里的引号/转义问题
+                ProcessBuilder("/bin/sh", "-c", "sleep 2; open -n \"$0\"", appBundle.absolutePath).start()
+                true
+            }.getOrDefault(false)
+        }
         val exe = launcherExe() ?: return false
         return runCatching {
             // 用 cmd 延迟启动：本进程马上就会退出，必须等它把文件句柄都放掉。
@@ -140,6 +172,16 @@ object DesktopActions {
      * @return 是否成功发起
      */
     fun shutdownComputer(seconds: Int = 0): Boolean {
+        // ★ Mac 移植：osascript 触发系统关机（无需 root；首次调用 macOS 会弹自动化授权确认）。
+        //   mac 版暂不支持延迟秒数（AppleScript 无法可靠倒计时，shutdown 命令需要 root），参数忽略。
+        if (isMacOS) {
+            return runCatching {
+                ProcessBuilder(
+                    "osascript", "-e", "tell application \"System Events\" to shut down"
+                ).start()
+                true
+            }.getOrDefault(false)
+        }
         if (!WindowsTitleBar.isWindows) return false
         return runCatching {
             ProcessBuilder("shutdown", "/s", "/t", seconds.coerceAtLeast(0).toString()).start()

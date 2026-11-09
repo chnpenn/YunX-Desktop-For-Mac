@@ -117,8 +117,12 @@ object GopeedEngine {
     /** 应用设置（读取「下载线程数 / 代理」用于下发引擎运行配置；Preferences 句柄复用一份） */
     private val settings: SettingsRepository by lazy { SettingsRepository() }
 
-    /** 内核可执行文件 */
-    fun exeFile(): File = File(File(engineDir(), BIN_DIR_NAME), EXE_NAME)
+    /** 内核可执行文件（★ Mac 移植：mac 上不带 .exe 后缀） */
+    fun exeFile(): File = File(File(engineDir(), BIN_DIR_NAME), exeName())
+
+    /** ★ Mac 移植：内核可执行文件名按平台区分 */
+    private fun exeName(): String =
+        if (System.getProperty("os.name", "").lowercase().contains("mac")) "gopeed" else EXE_NAME
 
     /** 引擎存储目录（bolt 数据库） */
     private fun storageDir(): File = File(engineDir(), "storage")
@@ -147,6 +151,7 @@ object GopeedEngine {
      * 从内核压缩包 / 可执行文件导入内核，支持：
      * - `.zip`（官方 `gopeed-web-<ver>-windows-amd64.zip`）：在包内按名找 `gopeed.exe`（任意层级）；
      * - `.exe`：直接作为内核拷入。
+     * ★ Mac 移植：mac 包（`gopeed-web-<ver>-macos-arm64.zip`）里的可执行文件叫 `gopeed`（无后缀）。
      * 导入前会先停掉正在运行的引擎（否则 exe 被占用、写入失败）。
      * @return 安装后的内核文件
      */
@@ -156,6 +161,8 @@ object GopeedEngine {
         if (_state.value == State.RUNNING) stop()
         val target = exeFile()
         target.parentFile?.mkdirs()
+        val isMac = System.getProperty("os.name", "").lowercase().contains("mac")
+        val kernelName = if (isMac) "gopeed" else EXE_NAME
 
         val name = archive.name.lowercase()
         if (name.endsWith(".zip")) {
@@ -164,7 +171,7 @@ object GopeedEngine {
                 var entry = zip.nextEntry
                 while (entry != null) {
                     val entryName = entry.name.replace('\\', '/')
-                    if (!entry.isDirectory && entryName.substringAfterLast('/').equals(EXE_NAME, ignoreCase = true)) {
+                    if (!entry.isDirectory && entryName.substringAfterLast('/').equals(kernelName, ignoreCase = true)) {
                         target.outputStream().buffered().use { out -> zip.copyTo(out) }
                         found = true
                         break
@@ -173,7 +180,20 @@ object GopeedEngine {
                 }
             }
             if (!found) {
-                throw IllegalStateException("压缩包里没有找到 $EXE_NAME（请使用 Gopeed 官方 windows-amd64 包）")
+                throw IllegalStateException("压缩包里没有找到 $kernelName（请使用 Gopeed 官方内核包）")
+            }
+            // ★ Mac 移植：解出的二进制补执行位与 ad-hoc 签名（未签名的二进制 macOS 拒绝执行）
+            if (isMac) {
+                runCatching {
+                    java.nio.file.Files.setPosixFilePermissions(
+                        target.toPath(),
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x")
+                    )
+                }
+                runCatching {
+                    ProcessBuilder("codesign", "--force", "--sign", "-", target.absolutePath)
+                        .start().waitFor()
+                }
             }
         } else {
             archive.copyTo(target, overwrite = true)

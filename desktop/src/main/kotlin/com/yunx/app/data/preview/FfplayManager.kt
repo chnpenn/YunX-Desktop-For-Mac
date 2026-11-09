@@ -55,6 +55,25 @@ object FfplayManager {
     /** DASH 合轨用到的可执行文件（与 ffplay 同包，一起解出来） */
     private const val FFMPEG_EXE = "ffmpeg.exe"
 
+    /** ★ Mac 移植：mac 上可执行文件不带 .exe 后缀 */
+    private fun exeName(): String = if (isMacOS) "ffplay" else EXE_NAME
+
+    /** ★ Mac 移植：同 [exeName] */
+    private fun ffmpegName(): String = if (isMacOS) "ffmpeg" else FFMPEG_EXE
+
+    /** ★ Mac 移植：macOS 环境 */
+    private val isMacOS: Boolean
+        get() = System.getProperty("os.name", "").lowercase().let { it.contains("mac") || it.contains("darwin") }
+
+    /**
+     * ★ Mac 移植：mac 无官方静态发行包，用 osxexperts.net 的社区构建（ffmpeg / ffplay 各自独立 zip）。
+     * 版本升级会更换文件名（ffmpeg<版本去点>arm|intel.zip），失效时由 UI 提示用户走 PATH（如 brew install ffmpeg）。
+     */
+    private fun macZip(tool: String): String {
+        val arch = if (System.getProperty("os.arch") == "aarch64") "arm" else "intel"
+        return "https://www.osxexperts.net/${tool}902${arch}.zip"
+    }
+
     /** ffplay 默认 UA 是 `Lavf/...`，很多平台的 CDN 会因此 403，缺省补一个 Chrome UA */
     private const val DEFAULT_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -122,20 +141,27 @@ object FfplayManager {
     val installDir: File get() = File(AppContext.dataDir, "tools/ffmpeg")
 
     /** 私有目录下的 ffplay 可执行文件 */
-    val privateExe: File get() = File(installDir, "bin/$EXE_NAME")
+    val privateExe: File get() = File(installDir, "bin/${exeName()}")
 
     /** 私有目录下的 ffmpeg 可执行文件（DASH 合轨用） */
-    private val privateFfmpeg: File get() = File(installDir, "bin/$FFMPEG_EXE")
+    private val privateFfmpeg: File get() = File(installDir, "bin/${ffmpegName()}")
 
     /** 常见安装目录（PATH 未命中时兜底） */
     private val commonDirs: List<File> = buildList {
-        System.getenv("ProgramFiles")?.let { add(File(it, "ffmpeg/bin")) }
-        System.getenv("ProgramFiles(x86)")?.let { add(File(it, "ffmpeg/bin")) }
-        System.getenv("LOCALAPPDATA")?.let {
-            add(File(it, "Microsoft/WinGet/Links"))
-            add(File(it, "Programs/ffmpeg/bin"))
+        if (isMacOS) {
+            // ★ Mac 移植：Homebrew（Apple Silicon / Intel）与系统目录
+            add(File("/opt/homebrew/bin"))
+            add(File("/usr/local/bin"))
+            add(File("/usr/bin"))
+        } else {
+            System.getenv("ProgramFiles")?.let { add(File(it, "ffmpeg/bin")) }
+            System.getenv("ProgramFiles(x86)")?.let { add(File(it, "ffmpeg/bin")) }
+            System.getenv("LOCALAPPDATA")?.let {
+                add(File(it, "Microsoft/WinGet/Links"))
+                add(File(it, "Programs/ffmpeg/bin"))
+            }
+            add(File("C:/ffmpeg/bin"))
         }
-        add(File("C:/ffmpeg/bin"))
     }
 
     @Volatile
@@ -154,13 +180,13 @@ object FfplayManager {
 
     /**
      * 定位可用的 ffplay（结果带缓存）。顺序：私有目录 → PATH → 常见安装目录。
-     * 非 Windows 直接返回 null（ffplay 嵌入方案仅 Windows 生效）。
+     * ★ Mac 移植：mac 同样生效（brew 安装或应用内下载），仅 Linux 之外其余平台均探测。
      */
     @Synchronized
     fun locate(forceRefresh: Boolean = false): File? {
-        if (!isWindows()) return null
+        if (!isWindows() && !isMacOS) return null
         if (!forceRefresh && checked) return cached
-        val found = detectExe(EXE_NAME, privateExe)
+        val found = detectExe(exeName(), privateExe)
         cached = found
         checked = true
         return found
@@ -168,13 +194,13 @@ object FfplayManager {
 
     /**
      * 定位可用的 ffmpeg（结果带缓存），供 DASH 合轨使用。顺序同 [locate]。
-     * 非 Windows 返回 null（当前合轨兜底为纯 Java 实现，不受平台限制）。
+     * 非 Windows 非 mac 返回 null（当前合轨兜底为纯 Java 实现，不受平台限制）。
      */
     @Synchronized
     fun locateFfmpeg(forceRefresh: Boolean = false): File? {
-        if (!isWindows()) return null
+        if (!isWindows() && !isMacOS) return null
         if (!forceRefresh && checkedFfmpeg) return cachedFfmpeg
-        val found = detectExe(FFMPEG_EXE, privateFfmpeg)
+        val found = detectExe(ffmpegName(), privateFfmpeg)
         cachedFfmpeg = found
         checkedFfmpeg = true
         return found
@@ -233,6 +259,8 @@ object FfplayManager {
      * 依次尝试 [candidates]，全部失败返回最后一个错误；协程取消会原样抛出。
      */
     suspend fun download(onProgress: (Long, Long) -> Unit = { _, _ -> }): Result<File> {
+        // ★ Mac 移植：osxexperts 社区构建，ffmpeg 与 ffplay 各自独立 zip，两个都下齐才算成功
+        if (isMacOS) return downloadMac(onProgress)
         if (!isWindows()) return Result.failure(IOException("仅支持 Windows"))
         return withContext(Dispatchers.IO) {
             // OkHttp 的 execute() 是阻塞的、不响应协程取消；用「看门狗」子协程在取消瞬间
@@ -270,6 +298,108 @@ object FfplayManager {
             } finally {
                 watchdog.cancel()
             }
+        }
+    }
+
+    /**
+     * ★ Mac 移植：下载 mac 版 ffmpeg / ffplay（osxexperts 独立 zip × 2）。
+     * 下载管道与 Windows 共用（并行分片 → 单连接回退），解包逻辑独立——
+     * osxexperts 的 zip 根下就是裸二进制，无 bin/ 目录且不带 .exe。
+     */
+    private suspend fun downloadMac(onProgress: (Long, Long) -> Unit): Result<File> {
+        return withContext(Dispatchers.IO) {
+            val registry = CallRegistry()
+            val watchdog = launch {
+                try {
+                    awaitCancellation()
+                } finally {
+                    registry.cancelAll()
+                }
+            }
+            try {
+                val client = HttpClients.downloadClient()
+                var lastError: Throwable? = null
+                for (src in listOf(macZip("ffplay"), macZip("ffmpeg"))) {
+                    try {
+                        downloadMacOne(client, registry, src, onProgress)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        currentCoroutineContext().ensureActive()
+                        lastError = t
+                        Log.w(TAG, "从 $src 获取失败: ${t.message}")
+                    }
+                }
+                val exe = privateExe.takeIf { it.isFile }
+                if (exe == null) {
+                    Result.failure(lastError ?: IOException("下载源不可用，可自行安装：brew install ffmpeg"))
+                } else {
+                    cached = exe
+                    checked = true
+                    cachedFfmpeg = privateFfmpeg.takeIf { it.isFile }
+                    checkedFfmpeg = true
+                    Log.i(TAG, "ffmpeg 下载完成: ${exe.absolutePath}")
+                    Result.success(exe)
+                }
+            } finally {
+                watchdog.cancel()
+            }
+        }
+    }
+
+    /** 下载并解包单个 mac 二进制 zip（zip 根下即 ffmpeg / ffplay），落地后补执行位与 ad-hoc 签名 */
+    private suspend fun downloadMacOne(
+        client: OkHttpClient,
+        registry: CallRegistry,
+        url: String,
+        onProgress: (Long, Long) -> Unit
+    ) {
+        val tmp = File(AppContext.cacheDir, "ffmpeg-download-${System.currentTimeMillis()}.zip")
+        try {
+            val parallelOk = try {
+                downloadParallel(client, registry, url, tmp, onProgress)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                currentCoroutineContext().ensureActive()
+                Log.w(TAG, "并行分片失败，回退单连接: ${t.message}")
+                false
+            }
+            if (!parallelOk) downloadStream(client, registry, url, tmp, onProgress)
+            val outBin = File(installDir, "bin").apply { mkdirs() }
+            var found = false
+            ZipInputStream(tmp.inputStream().buffered()).use { zis ->
+                while (true) {
+                    val entry = zis.nextEntry ?: break
+                    if (entry.isDirectory) {
+                        zis.closeEntry()
+                        continue
+                    }
+                    val name = entry.name.replace('\\', '/').substringAfterLast('/')
+                    if (name == "ffmpeg" || name == "ffplay") {
+                        val outFile = File(outBin, name)
+                        outFile.outputStream().buffered().use { out -> zis.copyTo(out) }
+                        macMakeExecutable(outFile)
+                        if (name == exeName()) found = true
+                    }
+                    zis.closeEntry()
+                }
+            }
+            if (!found) throw IOException("压缩包中未找到 ffplay")
+        } finally {
+            runCatching { tmp.delete() }
+        }
+    }
+
+    /** mac 二进制落地后补执行位；Apple Silicon 要求可执行文件必须带签名，ad-hoc 签名即可本地运行 */
+    private fun macMakeExecutable(file: File) {
+        runCatching {
+            java.nio.file.Files.setPosixFilePermissions(
+                file.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x")
+            )
+        }
+        runCatching {
+            ProcessBuilder("codesign", "--force", "--sign", "-", file.absolutePath)
+                .start().waitFor()
         }
     }
 

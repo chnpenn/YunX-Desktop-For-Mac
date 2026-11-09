@@ -176,6 +176,9 @@ tasks.register<JavaExec>("testInProcess") {
 }
 
 // 编译 native/darkmode.cpp → build/native/darkmode.dll（托盘原生菜单暗色桥接层）
+// ★ Mac 移植：DLL 仅服务 Windows。非 Windows 跳过编译（DarkMode.kt 在非 Windows 不会加载它，
+//   TrayManager/Win32PopupMenu 也都有 isWindows 守卫），避免 MSVC/MinGW 缺失导致 run/package 失败。
+val onWindows = System.getProperty("os.name", "").lowercase().contains("win")
 val nativeSrcDir = file("native")
 val nativeOutDir = layout.buildDirectory.dir("native").get().asFile
 val darkModeSrc = File(nativeSrcDir, "darkmode.cpp")
@@ -202,6 +205,7 @@ fun findMsvcVcvars(): File? {
 }
 
 val compileDarkMode by tasks.registering(Exec::class) {
+    enabled = onWindows
     val vcvars = findMsvcVcvars()
     inputs.file(darkModeSrc)
     outputs.file(darkModeOut)
@@ -230,7 +234,8 @@ val compileDarkMode by tasks.registering(Exec::class) {
 tasks.withType<JavaExec> {
     dependsOn(compileDarkMode)
     val jvmBin = File(System.getProperty("java.home"), "bin").absolutePath
-    systemProperty("java.library.path", "${nativeOutDir.absolutePath};$jvmBin")
+    val pathSep = if (onWindows) ";" else ":"
+    systemProperty("java.library.path", "${nativeOutDir.absolutePath}$pathSep$jvmBin")
 }
 
 // 收集运行时依赖 jar 路径（供便携版 app-image 打包）
@@ -259,6 +264,18 @@ tasks.register<Sync>("exportJcefNatives") {
 compose.desktop {
     application {
         mainClass = "com.yunx.app.MainKt"
+        // ★ Mac 移植：JCEF 的 mac 层（CefBrowserWindowMac 等）要访问 JDK 内部 API，
+        //   缺这些参数会每帧抛 IllegalAccessError（sun.awt.AWTAccessor 不可访问），内嵌浏览器无法渲染。
+        //   Windows 发布包由启动器注入等效参数；这些 flag 对所有 JDK 9+ 平台均合法，统一声明即可。
+        jvmArgs(
+            "--add-exports", "java.base/sun.security.action=ALL-UNNAMED",
+            "--add-exports", "java.desktop/com.sun.awt=ALL-UNNAMED",
+            "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+            "--add-opens", "java.desktop/java.awt=ALL-UNNAMED",
+            "--add-opens", "java.desktop/sun.awt=ALL-UNNAMED",
+            "--add-opens", "java.desktop/sun.awt.shell=ALL-UNNAMED",
+            "--add-opens", "java.desktop/com.sun.imageio=ALL-UNNAMED",
+        )
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Dmg)
             // ★ resources/common|windows|macos|linux 下的文件会拷进发行版的 app/resources/，

@@ -91,6 +91,7 @@ object GopeedKernelProvisioner {
 
     /**
      * 查询官方最新 Release，拼出本机可用的内核计划。
+     * ★ Mac 移植：mac 上官方资产名为 `gopeed-web-<tag>-macos-<arch>.zip`。
      * @param mirrorPrefix 调用方指定的镜像前缀；null/空走 GitHubMirror 自动选最快（或用户固定）
      */
     suspend fun resolvePlan(mirrorPrefix: String?): Plan = withContext(Dispatchers.IO) {
@@ -98,12 +99,14 @@ object GopeedKernelProvisioner {
         val json = fetchLatestJson()
         val tag = json.optString("tag_name")
         if (tag.isBlank()) throw IllegalStateException("官方 Release 缺少版本号")
-        val wanted = "$ASSET_PREFIX$tag-windows-${archSuffix()}$ASSET_ARCH_SUFFIX"
+        val isMac = System.getProperty("os.name", "").lowercase().contains("mac")
+        val osSegment = if (isMac) "macos" else "windows"
+        val wanted = "$ASSET_PREFIX$tag-$osSegment-${archSuffix()}$ASSET_ARCH_SUFFIX"
         val asset = json.optJSONArray("assets")?.let { arr ->
             (0 until arr.length())
                 .mapNotNull { arr.optJSONObject(it) }
                 .firstOrNull { it.optString("name").equals(wanted, ignoreCase = true) }
-        } ?: throw IllegalStateException("官方 Release（$tag）里没有 Windows 内核包 $wanted")
+        } ?: throw IllegalStateException("官方 Release（$tag）里没有内核包 $wanted")
         val direct = asset.optString("browser_download_url")
         if (direct.isBlank()) throw IllegalStateException("内核包缺少下载地址")
         Plan(

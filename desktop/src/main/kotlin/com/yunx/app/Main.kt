@@ -26,6 +26,7 @@ import com.yunx.app.util.SingleInstance
 import com.yunx.app.util.TrayManager
 import com.yunx.app.util.Win32PopupMenu
 import com.yunx.app.util.WindowFx
+import com.yunx.app.util.WindowsTitleBar
 import androidx.compose.ui.graphics.toComposeImageBitmap
 
 // WindowExceptionHandler 在 Compose 1.7 仍标注为实验 API；本项目锁 1.7.3，用它是为了
@@ -274,32 +275,50 @@ fun main(args: Array<String>) {
                     (window as? java.awt.Frame)?.let { WindowFx.scheduleFadeIn(it) }
                 }
             }
-            // 系统托盘：JNA 调 Win32 TrackPopupMenu（原生菜单，中文正常，暗色跟随系统）
+            // 系统托盘：Windows 走 JNA 调 Win32 TrackPopupMenu（原生菜单，中文正常，暗色跟随系统）；
+            // ★ Mac 移植：mac 菜单栏托盘图标是「点开菜单」模型，走 AWT PopupMenu 回退
             androidx.compose.runtime.LaunchedEffect(Unit) {
                 TrayManager.loadTrayIcon()?.let { icon ->
-                    TrayManager.install(
-                        image = icon,
-                        onLeftClick = { DesktopActions.bringWindowToFront(mainWindow) },
-                        onRightClick = { x, y ->
-                            val cmd = Win32PopupMenu.show(
-                                items = listOf(
-                                    "显示主窗口" to 1,
-                                    "-" to 0,
-                                    "退出" to 2
-                                ),
-                                x = x, y = y
-                            )
-                            when (cmd) {
-                                1 -> DesktopActions.bringWindowToFront(mainWindow)
-                                2 -> {
+                    if (WindowsTitleBar.isWindows) {
+                        TrayManager.install(
+                            image = icon,
+                            onLeftClick = { DesktopActions.bringWindowToFront(mainWindow) },
+                            onRightClick = { x, y ->
+                                val cmd = Win32PopupMenu.show(
+                                    items = listOf(
+                                        "显示主窗口" to 1,
+                                        "-" to 0,
+                                        "退出" to 2
+                                    ),
+                                    x = x, y = y
+                                )
+                                when (cmd) {
+                                    1 -> DesktopActions.bringWindowToFront(mainWindow)
+                                    2 -> {
+                                        saveWindowPosition(mainWindow)
+                                        val w = mainWindow
+                                        if (w != null) WindowFx.fadeOutThen(w) { exitApplication() }
+                                        else exitApplication()
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        TrayManager.installWithMenu(
+                            image = icon,
+                            items = listOf(
+                                "显示主窗口" to { DesktopActions.bringWindowToFront(mainWindow) },
+                                "-" to {},
+                                "退出" to {
                                     saveWindowPosition(mainWindow)
                                     val w = mainWindow
                                     if (w != null) WindowFx.fadeOutThen(w) { exitApplication() }
                                     else exitApplication()
                                 }
-                            }
-                        }
-                    )
+                            ),
+                            onLeftClick = { DesktopActions.bringWindowToFront(mainWindow) }
+                        )
+                    }
                 }
             }
             ComposeEmptyActivityTheme {
