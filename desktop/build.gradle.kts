@@ -26,21 +26,21 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
 
     // Room -> 纯 JDBC SQLite
-    // ★ 用裁剪后的本地 jar：官方包 13.6 MB，含六个平台的原生库，本项目只跑 Windows。
-    //   只保留 org/sqlite/native/Windows（x86/x86_64/arm/arm64），其余代码与 META-INF 原样保留。
-    implementation(files("libs/sqlite-jdbc-3.47.1.0-win.jar"))
+    // ★ Mac 移植：官方全平台 jar（含 macOS aarch64/x86_64 原生库）。
+    //   Windows 原版用的是裁剪过的本地 jar（libs/sqlite-jdbc-3.47.1.0-win.jar，只含 Windows 原生库）。
+    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
     // Android 内置 org.json 的 JVM 等价物
     implementation("org.json:json:20240303")
     // 主题种子色（material-color-utilities 无公开仓库坐标；从 material 1.14.0 AAR 解包 classes.jar 本地引入）
     implementation(files("libs/material-color-utilities-1.0.0.jar"))
 
     // JavaFX MediaView 播放器（M6）：JFXPanel 经 SwingPanel 嵌入 Compose。
-    // 版本跟随 jvmToolchain(17)；发布目标只有 Windows，直接用 :win classifier（jar 内含原生库，
+    // 版本跟随 jvmToolchain(17)；Mac 移植改用 :mac-aarch64 classifier（jar 内含原生库，
     // 首次运行由 JavaFX 自动解到用户目录缓存，jpackage 无需额外处理）
-    implementation("org.openjfx:javafx-base:17.0.13:win")
-    implementation("org.openjfx:javafx-graphics:17.0.13:win")
-    implementation("org.openjfx:javafx-media:17.0.13:win")
-    implementation("org.openjfx:javafx-swing:17.0.13:win")
+    implementation("org.openjfx:javafx-base:17.0.13:mac-aarch64")
+    implementation("org.openjfx:javafx-graphics:17.0.13:mac-aarch64")
+    implementation("org.openjfx:javafx-media:17.0.13:mac-aarch64")
+    implementation("org.openjfx:javafx-swing:17.0.13:mac-aarch64")
 
     // GFM Markdown 渲染（README / 更新说明）。注意：必须停留在 0.33.x ——
     // 0.34.0 起改用 Compose 1.8+ 的 BasicText 签名（含 TextAutoSize），与项目锁定的
@@ -71,7 +71,8 @@ dependencies {
     //   发布包不随带这个 120MB 的 jar，改由打包脚本用 JcefNativesPacker 重打成
     //   app\jcef-natives.tar.gz（裁剪语言包），首次使用时由 JcefNativesInstaller 解开。
     //   见 portable-package.ps1 [2c/5] 与 ui/jcef/JcefNativesInstaller.kt。
-    implementation("me.friwi:jcef-natives-windows-amd64:jcef-1770317+cef-132.3.1+g144febe+chromium-132.0.6834.83")
+    //   Mac 移植：换成同版本 jcef-natives-macosx-arm64（Maven Central 与 win 版同版本号发布）。
+    implementation("me.friwi:jcef-natives-macosx-arm64:jcef-1770317+cef-132.3.1+g144febe+chromium-132.0.6834.83")
 
     // tar.gz 读写：CEF 原生库发布包（打包期重打成 gzip，运行期自解包）
     // jcefmaven 已传递引入 commons-compress，这里显式声明版本以保证稳定
@@ -259,7 +260,10 @@ compose.desktop {
     application {
         mainClass = "com.yunx.app.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Exe)
+            targetFormats(TargetFormat.Exe, TargetFormat.Dmg)
+            // ★ resources/common|windows|macos|linux 下的文件会拷进发行版的 app/resources/，
+            //   DMG / 安装包随之携带 THIRD-PARTY-NOTICES（AGPL 分发合规要求）
+            appResourcesRootDir.set(projectDir.resolve("resources"))
             // sqlite-jdbc 通过反射加载 java.sql.Driver，jlink 自动检测不到，必须显式声明；
             // jdk.httpserver 是视频预览的本地回环代理（com.sun.net.httpserver），
             // jdk.unsupported.desktop 是 JavaFX 与 Swing 互操作（JFXPanel 里的 jdk.swing.interop）——

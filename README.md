@@ -23,6 +23,17 @@ Range 分片并发 + 断点续传，B 站高清自动合轨。
 
 ***
 
+> [!IMPORTANT]
+> ## 非官方声明 —— YunX-Desktop-For-Mac（macOS 社区移植版）
+>
+> **本仓库是 [tidain/YunX-Desktop](https://github.com/tidain/YunX-Desktop)（云析官方 Windows 桌面版）的非官方 macOS 移植版**，由社区维护，与原项目及原作者不存在隶属/背书关系。
+>
+> - **与原项目的关系**：上游 `tidain/YunX-Desktop` 面向 Windows（Inno Setup / jpackage Exe）；本仓库在其代码基础上新增 macOS 支持（jpackage DMG），同属云析（YunX）项目生态，上游亦自安卓版 [CYQawa/YunX](https://github.com/CYQawa/YunX) 移植而来。
+> - **已有改动**：SQLite 驱动换用官方全平台 jar（原为仅含 Windows 原生库的裁剪包）；JavaFX classifier 由 `:win` 改为 `:mac-aarch64`；JCEF 原生库换用同版本 `jcef-natives-macosx-arm64`；jpackage 增加 `Dmg` 目标与第三方声明资源目录；新增 `gradlew`（上游未提交）；其余 Windows 专属适配（Cookie 导入、暗色标题栏、托盘菜单、ffmpeg/Gopeed 引擎的 mac 分发等）持续进行中，详见提交历史。
+> - **开源协议**：沿用上游 **AGPL-3.0**。本移植版全部修改同样以 AGPL-3.0 开放，使用本仓库代码请同样以 AGPL-3.0 开放源代码。
+> - **Gopeed / ffmpeg 等下载内核维持运行时按需下载**，不随安装包分发。
+> - 上游功能与 Windows 版请以 [tidain/YunX-Desktop](https://github.com/tidain/YunX-Desktop) 为准；macOS 移植相关问题请在本仓库反馈。
+
 > **云析永远免费开源。** 如果你是在任何地方「花钱买到」的，说明你被骗了，请立即退款。
 > 任何收费版本均为二次打包的诈骗版本，与本项目无关。
 
