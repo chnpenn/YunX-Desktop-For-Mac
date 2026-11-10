@@ -12,6 +12,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
@@ -912,7 +914,22 @@ private fun DriveAccountCardContent(
         }
 
         when {
-            account.isLoggedIn && onMoreClick != null -> IconButton(onClick = onMoreClick) {
+            // ★ Mac 移植：不用 M3 IconButton——它的悬停配色会在指针首次悬停时触发重组，
+            //   Compose Desktop 上会把同一次点击的按下/抬起拆到两个 pointerInput 实例，
+            //   首次点击直接丢失（实测：先悬停再点一次生效，冷点一次无效）。
+            //   改用无 indication、无 hover 状态读取的 Box+clickable：悬停不重组，
+            //   首次点击必定落在同一 handler 上。
+            account.isLoggedIn && onMoreClick != null -> Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = onMoreClick
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
                 Icon(
                     imageVector = Icons.Outlined.MoreVert,
                     contentDescription = "更多",
