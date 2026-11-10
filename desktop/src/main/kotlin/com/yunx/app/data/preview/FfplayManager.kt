@@ -67,11 +67,16 @@ object FfplayManager {
 
     /**
      * ★ Mac 移植：mac 无官方静态发行包，用 osxexperts.net 的社区构建（ffmpeg / ffplay 各自独立 zip）。
-     * 版本升级会更换文件名（ffmpeg<版本去点>arm|intel.zip），失效时由 UI 提示用户走 PATH（如 brew install ffmpeg）。
+     * 版本升级会更换文件名（ffmpeg<版本去点>arm|intel.zip），因此维护候选源列表：
+     * osxexperts 主源 + 两个版本回退备源，全部失败时 UI 引导 brew install ffmpeg。
      */
-    private fun macZip(tool: String): String {
+    private fun macZipCandidates(tool: String): List<String> {
         val arch = if (System.getProperty("os.arch") == "aarch64") "arm" else "intel"
-        return "https://www.osxexperts.net/${tool}902${arch}.zip"
+        return listOf(
+            "https://www.osxexperts.net/${tool}902${arch}.zip",          // 主源：osxexperts（FFmpeg 9.0.2）
+            "https://www.osxexperts.net/${tool}702${arch}.zip",          // 备源1：osxexperts 7.0.2（版本回退）
+            "https://www.osxexperts.net/${tool}601${arch}.zip"           // 备源2：osxexperts 6.0.1（版本回退）
+        )
     }
 
     /** ffplay 默认 UA 是 `Lavf/...`，很多平台的 CDN 会因此 403，缺省补一个 Chrome UA */
@@ -319,7 +324,7 @@ object FfplayManager {
             try {
                 val client = HttpClients.downloadClient()
                 var lastError: Throwable? = null
-                for (src in listOf(macZip("ffplay"), macZip("ffmpeg"))) {
+                for (src in macZipCandidates("ffplay") + macZipCandidates("ffmpeg")) {
                     try {
                         downloadMacOne(client, registry, src, onProgress)
                     } catch (t: Throwable) {
