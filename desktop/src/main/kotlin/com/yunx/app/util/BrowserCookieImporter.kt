@@ -244,12 +244,21 @@ object BrowserCookieImporter {
             val key = factory.generateSecret(spec).encoded
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(ByteArray(16) { ' '.code.toByte() }))
-            val plain = String(cipher.doFinal(payload), Charsets.UTF_8)
-            // ★ 只接受可打印 ASCII 的 Cookie 值。个别埋点 Cookie（_UP_* 等）解出来是二进制，
-            //   String(UTF-8) 会产生 U+FFFD 替换符，拼进 Cookie 头时 OkHttp 直接抛
-            //   「Unexpected char 0xfffd」→ 整个导入在校验昵称一步炸掉。
-            //   登录凭证（__pus/__puus 等）都是纯 ASCII，不受影响；乱码 Cookie 主动丢弃。
-            plain.takeIf { s -> s.none { c -> c < ' ' || c > '~' } }
+            val plain = cipher.doFinal(payload)
+            // ★ Chrome 130+ 的 mac os_crypt 在明文前加了 32 字节二进制信封头（密钥标识，
+            //   同一 Profile 下所有 Cookie 相同）。真实 Cookie 值从第 33 字节开始、纯可打印 ASCII。
+            //   实测本机 30 个夸克 Cookie：全部「32B 头 + 纯 ASCII 值」，isQuark=true / b-user-id=UUID 等
+            //   语义完全正确。旧版 Chrome（无信封）明文整体即纯 ASCII，两种形态都兼容。
+            val printable = { b: Byte -> b in 0x20..0x7e }
+            val valueBytes = when {
+                plain.isEmpty() -> return@runCatching null
+                plain.all(printable) -> plain
+                plain.size > 32 && !printable(plain[0]) &&
+                    plain.copyOfRange(32, plain.size).all(printable) ->
+                    plain.copyOfRange(32, plain.size)
+                else -> return@runCatching null // 头部剥离后仍非纯 ASCII：真乱码，丢弃
+            }
+            String(valueBytes, Charsets.UTF_8)
         }.getOrNull()
     }
 
