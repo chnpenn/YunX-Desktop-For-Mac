@@ -92,6 +92,9 @@ import kotlin.math.sin
 /** QQ 交流群群号（桌面端无 mqqapi scheme 保证，点击复制群号供用户在 QQ 中搜索） */
 private const val QQ_GROUP = "635207650"
 
+/** Mac 版交流群群号（Mac 移植版维护者的群，与上游 Windows 群并存展示） */
+private const val MAC_QQ_GROUP = "1121753821"
+
 /** 引导页总页数：欢迎 / 功能特性 / 协议与声明 / 存储与安全 */
 private const val PAGE_COUNT = 4
 
@@ -280,7 +283,7 @@ private fun WelcomePage() {
     OnboardingPage(centerVertically = true) {
         // 应用图标：圆角 + 投影，形成"浮在 blob 上"的观感
         Image(
-            painter = painterResource("about_icon.png"),
+            painter = painterResource("icon.png"),
             contentDescription = "云析图标",
             modifier = Modifier
                 .size(120.dp)
@@ -328,7 +331,11 @@ private fun WelcomePage() {
         GitHubCard()
 
         Spacer(modifier = Modifier.height(12.dp))
-        QQGroupPill()
+        // 原作者的 Windows 群信息保留，Mac 版交流群单独一行
+        QQGroupPill(label = "QQ 群 $QQ_GROUP", group = QQ_GROUP)
+
+        Spacer(modifier = Modifier.height(8.dp))
+        QQGroupPill(label = "Mac 版交流群：$MAC_QQ_GROUP", group = MAC_QQ_GROUP)
     }
 }
 
@@ -410,11 +417,11 @@ private fun GitHubCard() {
  * ★ 反馈用全局 Snackbar —— 引导页自己渲染了 GlobalSnackbarHost（见 OnboardingScreen）。
  */
 @Composable
-private fun QQGroupPill() {
+private fun QQGroupPill(label: String, group: String) {
     Card(
         onClick = {
-            DesktopActions.copyToClipboard(QQ_GROUP)
-            SnackbarController.show("QQ 群号已复制：$QQ_GROUP")
+            DesktopActions.copyToClipboard(group)
+            SnackbarController.show("QQ 群号已复制：$group")
         },
         shape = CircleShape,
         colors = CardDefaults.cardColors(
@@ -433,7 +440,7 @@ private fun QQGroupPill() {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "QQ 群 $QQ_GROUP",
+                text = label,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )

@@ -57,7 +57,8 @@ import com.yunx.app.util.DesktopActions
 
 /**
  * 支持开发页：展示赞赏码与开源仓库入口。
- * Material3 风格：渐变头部 + 卡片展示赞赏码（安卓版 + 桌面端） + 感谢语 + 开源仓库按钮。
+ * Material3 风格：渐变头部 + 卡片展示赞赏码（macOS：Mac 版维护者；Windows：上游安卓版 + 桌面端）
+ * + 感谢语 + 开源仓库按钮 + Mac 版下载入口。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,6 +68,12 @@ fun SupportScreen(
 ) {
     // 系统返回键 → 返回设置页
     BackHandler { onBack() }
+
+    // 赞赏码按平台区分：macOS 移植版只展示 Mac 版维护者（chnpenn）的赞赏码；
+    // Windows 构建保留上游两位作者（安卓版 CYQawa / 桌面端 tidain）的赞赏码不变
+    val isMac = remember {
+        System.getProperty("os.name")?.contains("mac", ignoreCase = true) == true
+    }
 
     // 赞赏码放大查看（点击小图弹出大图对话框，方便手机扫码）
     var zoomedQr by remember { mutableStateOf<String?>(null) }
@@ -174,56 +181,33 @@ fun SupportScreen(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // 赞赏码：左右两张并排，点击可放大方便扫码
+                    // 赞赏码：macOS 只放一张 Mac 版维护者的码；Windows 构建保留上游两张码，点击可放大方便扫码
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // 安卓版作者赞赏码
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Surface(
-                                modifier = Modifier
-                                    .size(140.dp)
-                                    .clickable { zoomedQr = "sponsor_cyqawa_weixin.png" },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest
-                            ) {
-                                androidx.compose.foundation.Image(
-                                    painter = painterResource("sponsor_cyqawa_weixin.png"),
-                                    contentDescription = "安卓版赞赏码（点击放大）",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "安卓版 (CYQawa)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        if (isMac) {
+                            SponsorQrItem(
+                                resource = "sponsor_mac_weixin.png",
+                                label = "Mac 版 (chnpenn)",
+                                contentDescription = "Mac 版赞赏码（点击放大）",
+                                onZoom = { zoomedQr = it }
                             )
-                        }
-                        Spacer(modifier = Modifier.width(20.dp))
-                        // 桌面端作者赞赏码
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Surface(
-                                modifier = Modifier
-                                    .size(140.dp)
-                                    .clickable { zoomedQr = "sponsor_tidain_weixin.png" },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest
-                            ) {
-                                androidx.compose.foundation.Image(
-                                    painter = painterResource("sponsor_tidain_weixin.png"),
-                                    contentDescription = "桌面端赞赏码（点击放大）",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "桌面端 (tidain)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            // 安卓版作者赞赏码
+                            SponsorQrItem(
+                                resource = "sponsor_cyqawa_weixin.png",
+                                label = "安卓版 (CYQawa)",
+                                contentDescription = "安卓版赞赏码（点击放大）",
+                                onZoom = { zoomedQr = it }
+                            )
+                            Spacer(modifier = Modifier.width(20.dp))
+                            // 桌面端作者赞赏码
+                            SponsorQrItem(
+                                resource = "sponsor_tidain_weixin.png",
+                                label = "桌面端 (tidain)",
+                                contentDescription = "桌面端赞赏码（点击放大）",
+                                onZoom = { zoomedQr = it }
                             )
                         }
                     }
@@ -300,11 +284,11 @@ fun SupportScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ---------- PC 版仓库入口 ----------
+            // ---------- 项目仓库入口 ----------
             OutlinedButton(
                 onClick = {
                     DesktopActions.openUrl("https://github.com/chnpenn/YunX-Desktop-For-Mac")
-                    SnackbarController.show("已打开 PC 版仓库")
+                    SnackbarController.show("已打开项目仓库")
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -316,7 +300,28 @@ fun SupportScreen(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("PC 版仓库")
+                Text("项目仓库")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ---------- Mac 版下载入口 ----------
+            OutlinedButton(
+                onClick = {
+                    DesktopActions.openUrl("https://github.com/chnpenn/YunX-Desktop-For-Mac/releases")
+                    SnackbarController.show("已打开 Mac 版下载页")
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.OpenInNew,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Mac 版下载")
             }
         }
     }
@@ -346,6 +351,38 @@ fun SupportScreen(
             confirmButton = {
                 TextButton(onClick = { zoomedQr = null }) { Text("关闭") }
             }
+        )
+    }
+}
+
+/** 单张赞赏码：140dp 小图 + 标签，点击通过 [onZoom] 复用支持页的放大弹窗（zoomedQr）机制 */
+@Composable
+private fun SponsorQrItem(
+    resource: String,
+    label: String,
+    contentDescription: String,
+    onZoom: (String) -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            modifier = Modifier
+                .size(140.dp)
+                .clickable { onZoom(resource) },
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest
+        ) {
+            androidx.compose.foundation.Image(
+                painter = painterResource(resource),
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

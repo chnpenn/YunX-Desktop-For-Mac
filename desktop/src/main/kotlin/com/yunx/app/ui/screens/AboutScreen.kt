@@ -108,13 +108,9 @@ fun AboutScreen(
             InfoCard(
                 icon = Icons.Outlined.Cloud,
                 title = "应用简介",
-                description = "云析（YunX）是一款网盘分享链接 + 视频链接解析与高速下载工具。" +
-                    "粘贴分享链接或视频短链，登录账号后即可浏览内容、在线预览并直接高速下载；" +
-                    "也支持磁力 / BT 种子 / ed2k 等 P2P 链接下载。\n" +
-                    "Windows 桌面端：YunX-Desktop 基于 Compose Multiplatform 构建，" +
-                    "在安卓版能力之上补齐桌面交互（右键菜单、文件夹整夹下载、可拖动窗口）。"
+                description = "本项目是基于 tidain/YunX-Desktop（Windows 桌面版，源于安卓版云析）的 macOS 移植版，" +
+                    "我们作为 Mac 版贡献者维护。"
             )
-            
 
             // ---------- 支持平台 ----------
             PlatformCard()
@@ -150,7 +146,7 @@ fun AboutScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "云析 v$versionName · Made with ❤ and deepseek",
+                text = "云析 v$versionName · Made with ❤ and GPT&Claude",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier
@@ -172,7 +168,7 @@ private fun AppHeader(versionName: String) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Image(
-            painter = painterResource("about_icon.png"),
+            painter = painterResource("icon.png"),
             contentDescription = "云析图标",
             modifier = Modifier.size(88.dp)
         )
@@ -391,7 +387,11 @@ private fun FeatureCard() {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TechCard() {
-    val techs = listOf("Kotlin", "Compose Multiplatform", "Material 3", "SQLite", "OkHttp", "FFmpeg", "JavaFX Media", "JCEF")
+    val techs = listOf(
+        "Kotlin", "Compose Multiplatform", "Material 3", "SQLite", "OkHttp", "FFmpeg", "JavaFX Media", "JCEF",
+        // Mac 移植版新增：AppKit 经 JNA 调用、osascript 拉起原生对话框、Gopeed 的 mac 内核
+        "macOS AppKit (JNA)", "osascript 原生对话框", "Gopeed mac 内核"
+    )
     SectionCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CardIcon(Icons.Outlined.Code)
