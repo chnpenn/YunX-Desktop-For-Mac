@@ -332,12 +332,10 @@ fun main(args: Array<String>) {
                 // 预热抖音解析用的隐藏浏览器：实测单次解析耗时几乎全在 Chromium
                 // 冷启动与 acrawler 挑战上（诊断日志 1.8~9.4s），提前把浏览器与站点
                 // Cookie 热起来，用户真正粘贴链接时即可省掉这段冷启动。
-                // ★ Mac 移植：mac 上**不预热**。JCEF 的隐藏浏览器会创建一个 0×0 的
-                //   原生窗口（实测窗口列表里出现 bounds=[0,0,0,0] 的 "YunX-Desktop"），
-                //   macOS 会把这个零尺寸窗口当成「主窗口」抢走 key 状态 —— 后果：
-                //   ① 主窗口第一次点击被系统拿去激活窗口（要点两次）；
-                //   ② 最小化后系统认为仍有窗口在显示，点 Dock 图标唤不回。
-                //   预热只是性能优化，抖音解析改用惰性初始化（首次解析稍慢），功能不受影响。
+                // ★ Mac 移植：JCEF 的隐藏浏览器曾创建 0×0 原生窗口抢走 key 状态
+                //   （首次点击被吞的元凶之一）。处理：启动期只做零尺寸窗口防御性清理，
+                //   **预热延迟到 30 秒后**再执行——此时主窗口已稳定为 key，即使预热产生
+                //   副作用窗口也不会干扰用户交互；预热仍能省掉首次抖音解析的冷启动。
                 if (!System.getProperty("os.name", "").lowercase().contains("mac")) {
                     HeadlessWebView.prewarm("https://www.douyin.com/")
                 } else {
@@ -354,6 +352,9 @@ fun main(args: Array<String>) {
                             }
                         }
                     }
+                    // 启动 30 秒后再预热：此时主窗口已稳定获得 key，用户交互不再受影响
+                    kotlinx.coroutines.delay(30_000)
+                    runCatching { HeadlessWebView.prewarm("https://www.douyin.com/") }
                 }
             }
             // 启动淡入：窗口 displayable 后压 0 → 等内容就绪 → 渐入
