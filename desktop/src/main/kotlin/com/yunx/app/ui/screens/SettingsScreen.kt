@@ -59,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -147,6 +148,14 @@ private val threadPlatformSections = listOf(
     ),
 )
 
+/** 「下载线程数」设置行摘要：展示主要平台当前线程数（迅雷固定 8；其余平台进弹窗查看/调整） */
+private fun threadsSummaryText(threads: Map<String, Int>): String {
+    fun of(platform: String) = threads[platform] ?: SettingsRepository.DEFAULT_DOWNLOAD_THREADS
+    return "夸克 ${of(DownloadPlatform.QUARK)} · UC ${of(DownloadPlatform.UC)} · " +
+        "迅雷 ${SettingsRepository.XUNLEI_DOWNLOAD_THREADS}（固定）；" +
+        "分片并发按平台设置，默认 ${SettingsRepository.DEFAULT_DOWNLOAD_THREADS} 最高 ${SettingsRepository.MAX_DOWNLOAD_THREADS}"
+}
+
 /**
  * 设置页：下载线程数设置 + 主题外观 + 检查更新 + 日志与网盘认证。
  */
@@ -189,6 +198,16 @@ fun SettingsScreen(
     // 下载保存目录：本地状态驱动 UI 刷新，同时同步 Preferences
     val settingsRepo = remember { SettingsRepository() }
     var downloadDirUri by remember { mutableStateOf(settingsRepo.downloadDirUri) }
+    // 按平台线程数：Compose 状态驱动「下载线程数」行摘要与弹窗刷新
+    // （Preferences 写入本身不触发重组；弹窗内容经 OverlayDialogRegistry 渲染、lambda 被 memoize，
+    //   只读 Preferences 永远拿不到重组信号，所以保存后必须同步更新此表）
+    val platformThreads = remember {
+        mutableStateMapOf<String, Int>().apply {
+            threadPlatformSections.forEach { section ->
+                section.items.forEach { item -> put(item.platform, settingsRepo.downloadThreadsFor(item.platform)) }
+            }
+        }
+    }
     var showDevMenu by remember { mutableStateOf(false) }
     // 诊断模式开关（开发调试菜单里）：本地状态驱动 UI，运行态在 DiagnosticLog 里（改完立刻生效）
     var diagnosticOn by remember { mutableStateOf(settingsRepo.diagnosticMode) }
@@ -239,7 +258,7 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Tune,
             title = "下载线程数",
-            description = "按平台分别设置分片并发数（默认 32，最高 512）",
+            description = threadsSummaryText(platformThreads),
             onClick = { showThreadsDialog = true }
         )
 
@@ -861,7 +880,7 @@ fun SettingsScreen(
                         ThreadPlatformGrid(
                             items = section.items,
                             twoColumns = threadGridTwoColumns,
-                            currentOf = { settingsRepo.downloadThreadsFor(it) },
+                            currentOf = { platformThreads[it] ?: settingsRepo.downloadThreadsFor(it) },
                             onClick = { item ->
                                 selectedThreadPlatform = item
                                 showPlatformThreadDialog = true
@@ -882,7 +901,8 @@ fun SettingsScreen(
         onDismissRequest = { showPlatformThreadDialog = false },
         title = { Text("${selectedThreadPlatform.label}线程数") },
         text = {
-            val current = settingsRepo.downloadThreadsFor(selectedThreadPlatform.platform)
+            val current = platformThreads[selectedThreadPlatform.platform]
+                ?: settingsRepo.downloadThreadsFor(selectedThreadPlatform.platform)
             Column(
                 modifier = Modifier
                     .heightIn(max = 320.dp)
@@ -899,6 +919,7 @@ fun SettingsScreen(
                                 threads = current,
                                 onSelect = { v ->
                                     settingsRepo.setDownloadThreads(selectedThreadPlatform.platform, v)
+                                    platformThreads[selectedThreadPlatform.platform] = v
                                     showPlatformThreadDialog = false
                                 },
                                 modifier = Modifier.weight(1f)
