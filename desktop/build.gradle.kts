@@ -280,6 +280,12 @@ compose.desktop {
             "--add-opens", "java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
             "--add-opens", "java.desktop/com.sun.imageio=ALL-UNNAMED",
         )
+        // ★ 开发运行（gradle run）时菜单栏也显示「云析」：-Xdock:name 是 macOS JDK 专有
+        //   选项，Windows/Linux 的 JVM 会报 Unrecognized option 直接拒绝启动，
+        //   所以只在 mac 上构建/运行时才加（mac 包由下方 macOS.dockName 统一声明，二者同值）。
+        if (System.getProperty("os.name", "").lowercase().contains("mac")) {
+            jvmArgs("-Xdock:name=云析")
+        }
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Dmg)
             // ★ resources/common|windows|macos|linux 下的文件会拷进发行版的 app/resources/，
@@ -300,6 +306,19 @@ compose.desktop {
             description = "YunX-Desktop - netdisk share-link parser and high-speed downloader (desktop port of YunX for Android)"
             vendor = "YunX-Desktop"
             copyright = "Copyright (C) 2026 tidain"
+            // ★ Mac 菜单栏/Dock 中文名（Windows/Linux 不受影响）：
+            //   - dockName → compose 插件给 jpackage 传 --java-options -Xdock:name=云析，
+            //     这是 Java/Swing 应用菜单栏第一项显示的应用名；
+            //   - macOS.packageName → jpackage --mac-package-name，jpackage 会把它写进
+            //     Info.plist 的 CFBundleName（Dock 悬停名/活动监视器进程名）。
+            //   compose 的 macOS DSL 没有 bundleName 属性，--mac-package-name 即等价物；
+            //   不用 infoPlist{ extraKeysRawXml } 注 CFBundleName——会与 jpackage 自动写入
+            //   的同名 key 重复，plutil 解析行为未定义。
+            //   .app 文件名仍由顶层 packageName（YunX-Desktop）决定：YunX-Desktop.app。
+            macOS {
+                dockName = "云析"
+                packageName = "云析"
+            }
         }
     }
 }
