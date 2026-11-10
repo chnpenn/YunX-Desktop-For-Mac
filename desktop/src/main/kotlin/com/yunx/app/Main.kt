@@ -250,6 +250,8 @@ fun main(args: Array<String>) {
                 com.yunx.app.ui.components.PreviewFullscreen.window = window
                 // 剪贴板分享链接弹窗：主窗口引用用于「主窗口失焦时才弹」判断 + 「打开」时切回前台
                 ClipboardLinkController.mainWindow = mainWindow
+                // ★ Mac 移植：文件对话框的父窗口（原生面板定位依赖它，缺省会跑到屏幕外）
+                DesktopActions.mainWindow = mainWindow
             }
             // 「上次关闭位置」/「自定义」还原：用 AWT 屏幕像素坐标，避开 WindowState 的 dp/density 换算。
             // 只在启动时执行一次；记录的坐标不可见（如副屏被拔掉）时不动，交给平台默认位置。

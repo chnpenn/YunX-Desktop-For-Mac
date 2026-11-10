@@ -222,19 +222,12 @@ object DesktopActions {
         val isMac = osName.contains("mac") || osName.contains("darwin")
 
         if (isMac) {
-            val dialog = FileDialog(dialogParent(), "选择文件夹", FileDialog.LOAD)
-            dialog.isMultipleMode = false
-            System.setProperty("apple.awt.fileDialogForDirectories", "true")
-            runCatching { dialog.isAlwaysOnTop = true }
-            dialog.isVisible = true
-            val dir = dialog.directory
-            val file = dialog.file
-            dialog.dispose()
-            return when {
-                dir == null -> null
-                file == null -> dir
-                else -> File(dir, file).absolutePath
-            }
+            // ★ mac 最终方案：放弃 AWT FileDialog——在 jpackage + Compose 环境下，
+            //   无论父窗口传 null / 主窗口、是否 EDT 显示、是否清理零尺寸窗口，
+            //   原生 NSOpenPanel 都会被定位到屏幕外（实测恒为 bounds=-250,880
+            //   onscreen=false；模态等待中整个应用像卡死）。改用 Swing JFileChooser：
+            //   纯 Java 渲染、位置完全由 Java 控制，功能不打折（外观非原生）。
+            return swingDirectoryChooser()
         }
 
         if (WindowsTitleBar.isWindows) {
@@ -248,8 +241,19 @@ object DesktopActions {
         return swingDirectoryChooser()
     }
 
-    /** 旧式 Swing 目录选择器（回退用） */
-    private fun swingDirectoryChooser(): String? = runCatching {
+    /** ★ Mac 移植：隐藏所有零尺寸窗口（幽灵 Frame 会让原生面板定位到屏幕外） */
+    private fun hideZeroSizeWindows() {
+        runCatching {
+            java.awt.Window.getWindows().forEach { w ->
+                if (w.width <= 1 && w.height <= 1) runCatching { w.isVisible = false }
+            }
+        }
+    }
+
+    /** Swing 目录选择器（Windows COM 不可用回退 / mac 主路径）。
+     *  ★ Mac 移植：mac 用它替代 AWT FileDialog（原生面板在 jpackage+Compose 下
+     *    会定位到屏幕外）。必须在 EDT 显示，否则 Swing 也会定位异常。 */
+    private fun swingDirectoryChooser(): String? = onEdt {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
         val chooser = JFileChooser(FileSystemView.getFileSystemView())
         chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
@@ -258,11 +262,7 @@ object DesktopActions {
         chooser.approveButtonText = "选择文件夹"
         chooser.currentDirectory = defaultDownloadDir
         val result = chooser.showOpenDialog(null)
-        if (result == JFileChooser.APPROVE_OPTION) {
-            chooser.selectedFile?.absolutePath
-        } else {
-            null
-        }
+        if (result == JFileChooser.APPROVE_OPTION) chooser.selectedFile?.absolutePath else null
     }.getOrNull()
 
     /**
@@ -331,37 +331,91 @@ object DesktopActions {
     }
 
     /**
-     * ★ Mac 移植：给 AWT 文件对话框找父窗口。
-     * 无父窗口的 FileDialog 在 mac 上可能落到 JCEF 重量级画布/主窗口**后面**——
-     * 对话框是模态的，看不见就只能干等，表现为「点了没反应、整个应用卡住」。
-     * 挂上主窗口作父 + 置前，保证弹在最前。
+     * ★ Mac 移植：主窗口引用（Main.kt 启动时注册）。
+     * 文件对话框必须以**主窗口**为父；之前用「第一个可见 Frame」可能选到 JCEF 的内部宿主窗口，
+     * 实测会导致对话框被定位到屏幕外（bounds=-250,880, onscreen=false），模态等待中应用像卡死。
      */
-    private fun dialogParent(): Frame? =
-        java.awt.Window.getWindows().filterIsInstance<Frame>().firstOrNull { it.isVisible }
+    @Volatile
+    var mainWindow: Frame? = null
+
+    /**
+     * ★ Mac 移植：给 AWT 文件对话框找父窗口（优先主窗口，其次面积最大的可见 Frame）。
+     */
+    private fun dialogParent(): Frame? {
+        mainWindow?.takeIf { it.isVisible }?.let { return it }
+        return java.awt.Window.getWindows().filterIsInstance<Frame>()
+            .filter { it.isVisible }
+            .maxByOrNull { it.width.toLong() * it.height.toLong() }
+    }
+
+    /**
+     * ★ Mac 移植：在 EDT 上执行并同步等结果（AWT 窗口必须在 EDT 创建/显示）。
+     * 调用方通常在 Dispatchers.IO，直接 show 原生面板会定位错乱。
+     * 已在 EDT 时直接执行，避免 invokeAndWait 死锁。
+     */
+    private fun <T> onEdt(block: () -> T): Result<T> = runCatching {
+        if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+            block()
+        } else {
+            var out: Any? = null
+            var err: Throwable? = null
+            java.awt.EventQueue.invokeAndWait {
+                try {
+                    out = block()
+                } catch (t: Throwable) {
+                    err = t
+                }
+            }
+            err?.let { throw it }
+            @Suppress("UNCHECKED_CAST")
+            out as T
+        }
+    }
 
     /** AWT 旧式文件选择对话框（Windows COM 不可用 / 非 Windows 回退） */
-    private fun awtPickFile(title: String): String? {
+    private fun awtPickFile(title: String): String? = onEdt {
+        // ★ Mac 移植：mac 走 JFileChooser（原生 FileDialog 会定位到屏幕外）
+        if (isMacOS) {
+            try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
+            val chooser = JFileChooser(FileSystemView.getFileSystemView())
+            chooser.fileSelectionMode = JFileChooser.FILES_ONLY
+            chooser.dialogTitle = title
+            chooser.currentDirectory = defaultDownloadDir
+            return@onEdt if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+                chooser.selectedFile?.absolutePath
+            } else null
+        }
         val dialog = FileDialog(dialogParent(), title, FileDialog.LOAD)
-        runCatching { dialog.isAlwaysOnTop = true }
         dialog.isVisible = true
         val dir = dialog.directory
         val file = dialog.file
         dialog.dispose()
-        return if (dir != null && file != null) File(dir, file).absolutePath else null
-    }
+        if (dir != null && file != null) File(dir, file).absolutePath else null
+    }.getOrNull()
 
     /** AWT 旧式另存为对话框（Windows COM 不可用 / 非 Windows 回退） */
-    private fun awtSaveFile(defaultName: String, title: String): String? {
+    private fun awtSaveFile(defaultName: String, title: String): String? = onEdt {
+        // ★ Mac 移植：mac 走 JFileChooser（原生 FileDialog 会定位到屏幕外）
+        if (isMacOS) {
+            try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
+            val chooser = JFileChooser(FileSystemView.getFileSystemView())
+            chooser.fileSelectionMode = JFileChooser.FILES_ONLY
+            chooser.dialogTitle = title
+            chooser.currentDirectory = defaultDownloadDir
+            chooser.selectedFile = File(defaultDownloadDir, defaultName)
+            return@onEdt if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                chooser.selectedFile?.absolutePath
+            } else null
+        }
         val dialog = FileDialog(dialogParent(), title, FileDialog.SAVE)
         dialog.file = defaultName
         dialog.directory = defaultDownloadDir.absolutePath
-        runCatching { dialog.isAlwaysOnTop = true }
         dialog.isVisible = true
         val dir = dialog.directory
         val file = dialog.file
         dialog.dispose()
-        return if (dir != null && file != null) File(dir, file).absolutePath else null
-    }
+        if (dir != null && file != null) File(dir, file).absolutePath else null
+    }.getOrNull()
 
     /**
      * 系统默认下载目录。
