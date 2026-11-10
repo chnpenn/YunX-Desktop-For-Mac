@@ -513,15 +513,18 @@ fun ThemeScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     PositionDropdown(
-                        options = listOf(
-                            SettingsRepository.WINDOW_POS_CENTER to "中间",
-                            SettingsRepository.WINDOW_POS_TOP_LEFT to "左上角",
-                            SettingsRepository.WINDOW_POS_BOTTOM_LEFT to "左下角",
-                            SettingsRepository.WINDOW_POS_TOP_RIGHT to "右上角",
-                            SettingsRepository.WINDOW_POS_BOTTOM_RIGHT to "右下角",
-                            SettingsRepository.WINDOW_POS_LAST to "上次关闭位置",
-                            SettingsRepository.WINDOW_POS_CUSTOM to "自定义"
-                        ),
+                        // ★ Mac 移植：「自定义」依赖 C# 原生遮罩选位进程（仅 Windows），
+                        //   mac 上不提供该选项，避免选中后无法完成选位
+                        options = buildList {
+                            add(SettingsRepository.WINDOW_POS_CENTER to "中间")
+                            add(SettingsRepository.WINDOW_POS_TOP_LEFT to "左上角")
+                            add(SettingsRepository.WINDOW_POS_BOTTOM_LEFT to "左下角")
+                            add(SettingsRepository.WINDOW_POS_TOP_RIGHT to "右上角")
+                            add(SettingsRepository.WINDOW_POS_BOTTOM_RIGHT to "右下角")
+                            add(SettingsRepository.WINDOW_POS_LAST to "上次关闭位置")
+                            val isMac = System.getProperty("os.name", "").lowercase().contains("mac")
+                            if (!isMac) add(SettingsRepository.WINDOW_POS_CUSTOM to "自定义")
+                        },
                         selected = startupPosition,
                         onSelect = {
                             startupPosition = it
@@ -531,7 +534,9 @@ fun ThemeScreen(
                         onExpandBottom = { revealBottomPx = it }
                     )
                     // 选了「自定义」才出现「设置位置」：打开全屏遮罩拖动站位框
-                    if (startupPosition == SettingsRepository.WINDOW_POS_CUSTOM) {
+                    // ★ Mac 移植：遮罩是 C# 原生进程（仅 Windows），mac 上不显示该入口
+                    val isMacOS = System.getProperty("os.name", "").lowercase().contains("mac")
+                    if (startupPosition == SettingsRepository.WINDOW_POS_CUSTOM && !isMacOS) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),

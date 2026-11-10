@@ -38,8 +38,9 @@ import com.yunx.app.ui.theme.compactMarkdownTypography
 /**
  * 发现新版本弹窗：标题 + 当前/最新版本 + 更新说明（Markdown 渲染、可滚动限高）+ 下载更新 / 稍后 / 不再提示该版本。
  *
- * 桌面版同时提供「安装版(.exe)」和「便携版(.zip)」两个下载入口，
- * 由用户按需选择；若某个类型在 Release 中不存在，则不显示对应按钮。
+ * 桌面版同时提供「安装版(.exe)」「便携版(.zip)」与 mac 的「DMG 安装包(.dmg)」下载入口，
+ * 按平台只显示 applicable 的按钮；若某个类型在 Release 中不存在，则不显示对应按钮。
+ * ★ Mac 移植：mac 上只显示 .dmg 入口，下载完成后文件落在下载目录，双击挂载安装。
  *
  * 弹窗走窗口内覆盖层（[FadeAlertDialog]），不创建原生窗口。
  */
@@ -59,8 +60,11 @@ fun UpdateDialog(
      */
     mandatory: Boolean = false
 ) {
-    val exeAsset = release.assets.firstOrNull { it.name.endsWith(".exe", true) }
-    val zipAsset = release.assets.firstOrNull { it.name.endsWith(".zip", true) }
+    // ★ Mac 移植：mac 上只识别/展示 .dmg 资产（Windows 的 .exe/.zip 按钮全部隐藏）
+    val isMacOS = System.getProperty("os.name", "").lowercase().contains("mac")
+    val dmgAsset = if (isMacOS) release.assets.firstOrNull { it.name.endsWith(".dmg", true) } else null
+    val exeAsset = if (isMacOS) null else release.assets.firstOrNull { it.name.endsWith(".exe", true) }
+    val zipAsset = if (isMacOS) null else release.assets.firstOrNull { it.name.endsWith(".zip", true) }
     // 说明里的图片复用 README 的自研加载器（无 Coil，走 GitHubMirror 统一镜像加速）
     GitHubMarkdownImageTransformer.mirrorPrefix = GitHubMirror.activePrefix()
     // 紧凑字号：与 README 共用同一份排版（见 ui/theme/Type.kt）
@@ -169,6 +173,35 @@ fun UpdateDialog(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 // 下载入口（安装版 / 便携版，各自可选镜像站）
+                if (dmgAsset != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = { onDownloadAsset(dmgAsset.downloadUrl, dmgAsset.name) },
+                        enabled = !downloading
+                    ) {
+                        if (downloading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("下载中…")
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.Download,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("下载 DMG 安装包")
+                        }
+                    }
+                    if (onDownloadMirrorAsset != null) {
+                        TextButton(onClick = { onDownloadMirrorAsset(dmgAsset.downloadUrl, dmgAsset.name) }) {
+                            Text("镜像站下载 DMG", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
                 if (exeAsset != null) {
                     Button(
                         onClick = { onDownloadAsset(exeAsset.downloadUrl, exeAsset.name) },
@@ -226,7 +259,7 @@ fun UpdateDialog(
                         }
                     }
                 }
-                if (exeAsset == null && zipAsset == null) {
+                if (exeAsset == null && zipAsset == null && dmgAsset == null) {
                     Text(
                         text = "该版本未提供安装包",
                         style = MaterialTheme.typography.bodySmall,

@@ -600,6 +600,22 @@ class DownloadManager(
         DiagnosticLog.dbOp("download_task", "complete", rowsOf = { -1 }) {
             dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath, avg)
         }
+        // ★ Mac 移植：Windows 的完成提示走 Toast 通知中心；mac 用 AWT 托盘气泡
+        //   （TrayManager 的 TrayIcon 在启动时已安装，displayMessage 在 mac 上
+        //   会转成系统通知）。应用在后台/托盘时用户也能感知下载完成。
+        if (!com.yunx.app.util.WindowsTitleBar.isWindows) {
+            val fileName = savedPath.substringAfterLast('/').ifBlank { "文件" }
+            scope.launch {
+                kotlinx.coroutines.delay(300) // 等 dao.complete 事务落盘，避免通知早于列表刷新
+                // 更新包（.dmg）完成时直接在访达里显示，方便立刻安装
+                if (fileName.endsWith(".dmg", true)) {
+                    com.yunx.app.util.TrayManager.showNotification("更新包已下载", "已在访达中显示，双击挂载安装")
+                    runCatching { com.yunx.app.util.DesktopActions.revealFile(savedPath) }
+                } else {
+                    com.yunx.app.util.TrayManager.showNotification("下载完成", fileName)
+                }
+            }
+        }
     }
 
     /** 每个任务一把互斥锁：暂停后立即恢复时避免新旧协程并发写分片 */
