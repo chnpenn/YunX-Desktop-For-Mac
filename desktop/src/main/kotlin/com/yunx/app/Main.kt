@@ -298,7 +298,29 @@ fun main(args: Array<String>) {
                 // 预热抖音解析用的隐藏浏览器：实测单次解析耗时几乎全在 Chromium
                 // 冷启动与 acrawler 挑战上（诊断日志 1.8~9.4s），提前把浏览器与站点
                 // Cookie 热起来，用户真正粘贴链接时即可省掉这段冷启动。
-                HeadlessWebView.prewarm("https://www.douyin.com/")
+                // ★ Mac 移植：mac 上**不预热**。JCEF 的隐藏浏览器会创建一个 0×0 的
+                //   原生窗口（实测窗口列表里出现 bounds=[0,0,0,0] 的 "YunX-Desktop"），
+                //   macOS 会把这个零尺寸窗口当成「主窗口」抢走 key 状态 —— 后果：
+                //   ① 主窗口第一次点击被系统拿去激活窗口（要点两次）；
+                //   ② 最小化后系统认为仍有窗口在显示，点 Dock 图标唤不回。
+                //   预热只是性能优化，抖音解析改用惰性初始化（首次解析稍慢），功能不受影响。
+                if (!System.getProperty("os.name", "").lowercase().contains("mac")) {
+                    HeadlessWebView.prewarm("https://www.douyin.com/")
+                } else {
+                    // 防御性清理：万一 JCEF 初始化仍产生了零尺寸窗口，隐藏并移出屏幕，
+                    // 避免它继续抢 key 状态（对已存在窗口做一次收尾处理）
+                    kotlinx.coroutines.delay(3000)
+                    runCatching {
+                        java.awt.Window.getWindows().forEach { w ->
+                            if (w.width <= 1 && w.height <= 1 && w !== window) {
+                                runCatching {
+                                    w.isVisible = false
+                                    w.focusableWindowState = false
+                                }
+                            }
+                        }
+                    }
+                }
             }
             // 启动淡入：窗口 displayable 后压 0 → 等内容就绪 → 渐入
             androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -366,10 +388,14 @@ fun main(args: Array<String>) {
                         // 记录当前窗口位置（下次启动「上次关闭位置」可还原）
                         saveWindowPosition(mainWindow)
                         if (System.getProperty("os.name", "").lowercase().contains("mac")) {
-                            // ★ Mac 移植：不走「隐藏窗口」——Compose 会把外部 isVisible 改动回滚，
-                            //   且托盘 AWT 菜单唤回不可靠，用户会陷入「窗口消失且打不开」。
-                            //   改为标准「最小化到 Dock」，点 Dock 图标即可恢复（macOS 原生习惯）。
-                            mainWindow?.extendedState = java.awt.Frame.ICONIFIED
+                            // ★ Mac 移植：用系统级「隐藏应用」(Cmd+H 等价) 代替隐藏窗口。
+                            //   理由：① AWT isVisible=false 会被 Compose 状态同步回滚；
+                            //   ② 隐藏窗口后点 Dock 图标唤不回（AWT 不处理 reopen 事件）；
+                            //   ③ NSApp hide 由 macOS 托管——点 Dock 图标必定恢复，是系统级保证。
+                            if (!com.yunx.app.util.MacAppActivation.hideApp()) {
+                                // 原生调用失败时退回最小化到 Dock
+                                mainWindow?.extendedState = java.awt.Frame.ICONIFIED
+                            }
                         } else {
                             // 隐藏窗口前先抑制关闭请求，避免 Compose 把 hide 当作 close 重跑逻辑
                             suppressCloseRequest = true

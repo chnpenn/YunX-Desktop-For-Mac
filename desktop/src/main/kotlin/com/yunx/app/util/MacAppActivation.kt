@@ -43,4 +43,60 @@ object MacAppActivation {
             Log.w(TAG, "activateIgnoringOtherApps 失败: ${it.message}")
         }.getOrDefault(false)
     }
+
+    /**
+     * 取消「隐藏应用」并激活（与 [hideApp] 配对）。
+     * 托盘菜单「显示主窗口」、剪贴板弹窗「打开」等唤回路径先调它，再置前窗口。
+     */
+    fun unhideAndActivate(): Boolean {
+        val l = objcLib ?: return false
+        return runCatching {
+            val getClassFn = l.getFunction("objc_getClass")
+            val selFn = l.getFunction("sel_registerName")
+            val msgSendFn = l.getFunction("objc_msgSend")
+
+            val cls = getClassFn.invokePointer(arrayOf<Any>("NSApplication"))
+                ?: return false
+            val shared = msgSendFn.invokePointer(
+                arrayOf<Any>(cls, selFn.invokePointer(arrayOf<Any>("sharedApplication")))
+            ) ?: return false
+            msgSendFn.invoke(
+                Void.TYPE,
+                arrayOf<Any>(shared, selFn.invokePointer(arrayOf<Any>("unhide:")), com.sun.jna.Pointer.NULL)
+            )
+            msgSendFn.invoke(
+                Void.TYPE,
+                arrayOf<Any>(shared, selFn.invokePointer(arrayOf<Any>("activateIgnoringOtherApps:")), 1)
+            )
+            true
+        }.onFailure {
+            Log.w(TAG, "unhideAndActivate 失败: ${it.message}")
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 隐藏整个应用（等价 Cmd+H）。macOS 的系统级行为保证：点击 Dock 图标即可恢复显示。
+     *
+     * 用它替代「隐藏主窗口」实现最小化到托盘——AWT 的 isVisible=false 会被 Compose
+     * 状态同步回滚，而且点 Dock 图标不会恢复；NSApp hide 由系统托管，恢复路径可靠。
+     */
+    fun hideApp(): Boolean {
+        val l = objcLib ?: return false
+        return runCatching {
+            val getClassFn = l.getFunction("objc_getClass")
+            val selFn = l.getFunction("sel_registerName")
+            val msgSendFn = l.getFunction("objc_msgSend")
+
+            val cls = getClassFn.invokePointer(arrayOf<Any>("NSApplication"))
+                ?: return false
+            val shared = msgSendFn.invokePointer(
+                arrayOf<Any>(cls, selFn.invokePointer(arrayOf<Any>("sharedApplication")))
+            ) ?: return false
+            val selHide = selFn.invokePointer(arrayOf<Any>("hide:"))
+            msgSendFn.invoke(Void.TYPE, arrayOf<Any>(shared, selHide, com.sun.jna.Pointer.NULL))
+            true
+        }.onFailure {
+            Log.w(TAG, "hideApp 失败: ${it.message}")
+        }.getOrDefault(false)
+    }
 }

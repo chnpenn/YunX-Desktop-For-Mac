@@ -117,6 +117,8 @@ object DesktopActions {
     fun bringWindowToFront(window: Frame?) {
         val w = window ?: return
         runCatching {
+            // ★ Mac 移植：应用可能处于「隐藏」(NSApp hide) 状态，先取消隐藏并激活
+            if (isMacOS) MacAppActivation.unhideAndActivate()
             w.isVisible = true
             if (w.extendedState and Frame.ICONIFIED != 0) {
                 w.extendedState = Frame.NORMAL
