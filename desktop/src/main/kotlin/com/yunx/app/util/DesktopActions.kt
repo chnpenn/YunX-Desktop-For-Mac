@@ -222,11 +222,10 @@ object DesktopActions {
         val isMac = osName.contains("mac") || osName.contains("darwin")
 
         if (isMac) {
-            // ★ mac 最终方案：放弃 AWT FileDialog——在 jpackage + Compose 环境下，
-            //   无论父窗口传 null / 主窗口、是否 EDT 显示、是否清理零尺寸窗口，
-            //   原生 NSOpenPanel 都会被定位到屏幕外（实测恒为 bounds=-250,880
-            //   onscreen=false；模态等待中整个应用像卡死）。改用 Swing JFileChooser：
-            //   纯 Java 渲染、位置完全由 Java 控制，功能不打折（外观非原生）。
+            // ★ mac：用 osascript 的系统原生面板（位置/外观与原生应用一致）。
+            //   AWT FileDialog 在 jpackage+Compose 下恒定位到屏幕外；JNA 直调 NSOpenPanel
+            //   受 OS 主线程限制不可行。失败回退 JFileChooser。
+            MacNativeDialogs.pick(directories = true, defaultDir = defaultDownloadDir)?.let { return it }
             return swingDirectoryChooser()
         }
 
@@ -374,8 +373,10 @@ object DesktopActions {
 
     /** AWT 旧式文件选择对话框（Windows COM 不可用 / 非 Windows 回退） */
     private fun awtPickFile(title: String): String? = onEdt {
-        // ★ Mac 移植：mac 走 JFileChooser（原生 FileDialog 会定位到屏幕外）
+        // ★ Mac 移植：mac 走 osascript 系统原生面板，失败回退 JFileChooser
         if (isMacOS) {
+            val native = MacNativeDialogs.pick(directories = false, defaultDir = defaultDownloadDir)
+            if (native != null) return@onEdt native
             try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
             val chooser = JFileChooser(FileSystemView.getFileSystemView())
             chooser.fileSelectionMode = JFileChooser.FILES_ONLY
@@ -395,8 +396,10 @@ object DesktopActions {
 
     /** AWT 旧式另存为对话框（Windows COM 不可用 / 非 Windows 回退） */
     private fun awtSaveFile(defaultName: String, title: String): String? = onEdt {
-        // ★ Mac 移植：mac 走 JFileChooser（原生 FileDialog 会定位到屏幕外）
+        // ★ Mac 移植：mac 走 osascript 原生「另存为」，失败回退 JFileChooser
         if (isMacOS) {
+            val native = MacNativeDialogs.save(defaultName, defaultDir = defaultDownloadDir)
+            if (native != null) return@onEdt native
             try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
             val chooser = JFileChooser(FileSystemView.getFileSystemView())
             chooser.fileSelectionMode = JFileChooser.FILES_ONLY
