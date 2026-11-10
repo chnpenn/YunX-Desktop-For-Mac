@@ -272,25 +272,30 @@ fun JcefLoginPane(
         }
 
         // 底部备选入口
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            AutoImportCookieButton(
-                platform = platform,
-                onImported = onSave,
-                onSaved = onSaved,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedButton(
-                onClick = onSwitchToPaste,
-                modifier = Modifier.weight(1f)
+        // ★ Mac 移植：「自动导入浏览器 Cookie」整体屏蔽（见 MAC_BROWSER_COOKIE_IMPORT_ENABLED），
+        //   「手动粘贴」也一并隐藏——网页登录 + 自动检测已覆盖主路径，粘贴模式仅在浏览器不可用时
+        //   有意义（不可用时本页会直接报错引导）。恢复时把整段 if 的条件去掉即可。
+        if (MAC_BROWSER_COOKIE_IMPORT_ENABLED || !System.getProperty("os.name", "").lowercase().contains("mac")) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(Icons.Outlined.ContentPaste, contentDescription = null)
-                Spacer(modifier = Modifier.size(6.dp))
-                Text("手动粘贴")
+                AutoImportCookieButton(
+                    platform = platform,
+                    onImported = onSave,
+                    onSaved = onSaved,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedButton(
+                    onClick = onSwitchToPaste,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Outlined.ContentPaste, contentDescription = null)
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text("手动粘贴")
+                }
             }
         }
     }
