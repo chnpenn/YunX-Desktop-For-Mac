@@ -51,6 +51,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.hoverable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
@@ -914,27 +916,50 @@ private fun DriveAccountCardContent(
         }
 
         when {
-            // ★ Mac 移植：不用 M3 IconButton——它的悬停配色会在指针首次悬停时触发重组，
-            //   Compose Desktop 上会把同一次点击的按下/抬起拆到两个 pointerInput 实例，
-            //   首次点击直接丢失（实测：先悬停再点一次生效，冷点一次无效）。
-            //   改用无 indication、无 hover 状态读取的 Box+clickable：悬停不重组，
-            //   首次点击必定落在同一 handler 上。
-            account.isLoggedIn && onMoreClick != null -> Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                        onClick = onMoreClick
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.MoreVert,
-                    contentDescription = "更多",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // ★ Mac 移植：不用 M3 IconButton——其悬停配色在 composition 里读取交互状态，
+            //   悬停会触发重组。改用 hoverable + drawBehind：悬停态只在 **绘制阶段** 读取，
+            //   只失效绘制、不触发重组，既保留悬停圆底动画，又避免重组干扰点击序列。
+            account.isLoggedIn && onMoreClick != null -> {
+                val hoverSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                // 悬停态写入 MutableState，但**只在 drawBehind 里读取**（绘制阶段），
+                // 状态变化仅失效绘制、不触发重组——既保留悬停圆底动画，又不干扰点击序列
+                val hoverState = remember { androidx.compose.runtime.mutableStateOf(false) }
+                androidx.compose.runtime.LaunchedEffect(hoverSource) {
+                    hoverSource.interactions.collect { i ->
+                        hoverState.value =
+                            i is androidx.compose.foundation.interaction.HoverInteraction.Enter
+                    }
+                }
+                val hoverColor = MaterialTheme.colorScheme.onSurfaceVariant
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .hoverable(hoverSource)
+                        .drawBehind {
+                            // 绘制阶段读取 hoverState：仅重绘，不重组
+                            if (hoverState.value) {
+                                drawCircle(
+                                    color = hoverColor.copy(alpha = 0.08f),
+                                    radius = size.minDimension / 2f
+                                )
+                            }
+                        }
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            com.yunx.app.util.Log.i("YunX-ClickDiag", "⋮ onClick 触发 platform=${account.name}")
+                            onMoreClick()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.MoreVert,
+                        contentDescription = "更多",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             account.isLoggedIn -> LoginBadge(isLoggedIn = true)
             clickable -> Text(

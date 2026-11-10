@@ -252,6 +252,30 @@ fun main(args: Array<String>) {
                 ClipboardLinkController.mainWindow = mainWindow
                 // ★ Mac 移植：文件对话框的父窗口（原生面板定位依赖它，缺省会跑到屏幕外）
                 DesktopActions.mainWindow = mainWindow
+                // ★ 诊断：记录所有鼠标按下与窗口焦点事件（排查「首次点击被吞」）
+                runCatching {
+                    java.awt.Toolkit.getDefaultToolkit().addAWTEventListener({ ev ->
+                        when (val e = ev) {
+                            is java.awt.event.MouseEvent -> if (e.id == java.awt.event.MouseEvent.MOUSE_PRESSED) {
+                                com.yunx.app.util.Log.i(
+                                    "YunX-ClickDiag",
+                                    "AWT press@${e.xOnScreen},${e.yOnScreen} src=${e.source?.javaClass?.simpleName} " +
+                                        "winFocused=${mainWindow?.isFocused}"
+                                )
+                            }
+                            is java.awt.event.WindowEvent -> when (e.id) {
+                                java.awt.event.WindowEvent.WINDOW_GAINED_FOCUS ->
+                                    com.yunx.app.util.Log.i("YunX-ClickDiag", "WINDOW_GAINED_FOCUS ${(e.window as? java.awt.Frame)?.title}")
+                                java.awt.event.WindowEvent.WINDOW_LOST_FOCUS ->
+                                    com.yunx.app.util.Log.i("YunX-ClickDiag", "WINDOW_LOST_FOCUS ${(e.window as? java.awt.Frame)?.title}")
+                                java.awt.event.WindowEvent.WINDOW_ACTIVATED ->
+                                    com.yunx.app.util.Log.i("YunX-ClickDiag", "WINDOW_ACTIVATED ${(e.window as? java.awt.Frame)?.title}")
+                                java.awt.event.WindowEvent.WINDOW_DEACTIVATED ->
+                                    com.yunx.app.util.Log.i("YunX-ClickDiag", "WINDOW_DEACTIVATED ${(e.window as? java.awt.Frame)?.title}")
+                            }
+                        }
+                    }, java.awt.AWTEvent.MOUSE_EVENT_MASK or java.awt.AWTEvent.WINDOW_EVENT_MASK)
+                }
             }
             // 「上次关闭位置」/「自定义」还原：用 AWT 屏幕像素坐标，避开 WindowState 的 dp/density 换算。
             // 只在启动时执行一次；记录的坐标不可见（如副屏被拔掉）时不动，交给平台默认位置。
