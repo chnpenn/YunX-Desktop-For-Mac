@@ -245,18 +245,19 @@ object BrowserCookieImporter {
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(ByteArray(16) { ' '.code.toByte() }))
             val plain = cipher.doFinal(payload)
-            // ★ Chrome 130+ 的 mac os_crypt 在明文前加了 32 字节二进制信封头（密钥标识，
-            //   同一 Profile 下所有 Cookie 相同）。真实 Cookie 值从第 33 字节开始、纯可打印 ASCII。
-            //   实测本机 30 个夸克 Cookie：全部「32B 头 + 纯 ASCII 值」，isQuark=true / b-user-id=UUID 等
-            //   语义完全正确。旧版 Chrome（无信封）明文整体即纯 ASCII，两种形态都兼容。
+            // ★ Chrome 130+ 的 mac os_crypt 在明文前加 32 字节二进制信封头（密钥标识，
+            //   同一 Profile 恒定，随加密批次而变）。真实值从第 33 字节起、纯可打印 ASCII。
+            //   ★ 不能用「首字节是否可打印」判别信封——信封是二进制，首字节恰好落在可打印区
+            //   完全可能（实测 UC 旧批次的信封首字节就是 'f'）。规则简化为：
+            //   整体纯 ASCII = 旧版无信封；含非可打印字节且 [32:] 纯 ASCII = 剥 32 字节头；
+            //   其余视为乱码丢弃。已实测夸克 30 个 + UC 16 个 Cookie 全部命中前两条。
             val printable = { b: Byte -> b in 0x20..0x7e }
             val valueBytes = when {
                 plain.isEmpty() -> return@runCatching null
                 plain.all(printable) -> plain
-                plain.size > 32 && !printable(plain[0]) &&
-                    plain.copyOfRange(32, plain.size).all(printable) ->
+                plain.size > 32 && plain.copyOfRange(32, plain.size).all(printable) ->
                     plain.copyOfRange(32, plain.size)
-                else -> return@runCatching null // 头部剥离后仍非纯 ASCII：真乱码，丢弃
+                else -> return@runCatching null // 剥头后仍非纯 ASCII：真乱码，丢弃
             }
             String(valueBytes, Charsets.UTF_8)
         }.getOrNull()
