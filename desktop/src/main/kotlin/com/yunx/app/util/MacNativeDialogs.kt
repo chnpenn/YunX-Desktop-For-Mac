@@ -26,7 +26,7 @@ object MacNativeDialogs {
      * @param directories true = 选文件夹（choose folder），false = 选文件（choose file）
      * @return 选中路径；用户取消或失败返回 null
      */
-    fun pick(directories: Boolean, defaultDir: File? = null): String? = runCatching {
+    fun pick(directories: Boolean, defaultDir: File? = null): String? {
         val loc = defaultDir?.takeIf { it.isDirectory }
             ?.let { " default location (POSIX file \"${it.absolutePath.replace("\\", "\\\\").replace("\"", "\\\"")}\")" }
             ?: ""
@@ -35,47 +35,54 @@ object MacNativeDialogs {
         } else {
             "POSIX path of (choose file with prompt \"选择文件\"$loc)"
         }
-        exec(script)?.let { File(it).absolutePath }
-    }.onFailure {
-        Log.w(TAG, "osascript 选择器失败: ${it.message}")
-    }.getOrNull()
+        // 取消 → null（不回退）；调用失败 → IOException 原样抛出（调用方决定回退）
+        return exec(script)?.let { File(it).absolutePath }
+    }
 
     /**
      * 弹出原生「另存为」选择器（choose file name：允许输入不存在的文件名）。
      * @param defaultName 预填文件名
      * @return 目标路径；取消返回 null
      */
-    fun save(defaultName: String, defaultDir: File? = null): String? = runCatching {
+    fun save(defaultName: String, defaultDir: File? = null): String? {
         val safeName = defaultName.replace("\\", "\\\\").replace("\"", "\\\"")
         val loc = defaultDir?.takeIf { it.isDirectory }
             ?.let { " default location (POSIX file \"${it.absolutePath.replace("\\", "\\\\").replace("\"", "\\\"")}\")" }
             ?: ""
         val script = "POSIX path of (choose file name with prompt \"保存文件\" default name \"$safeName\"$loc)"
-        exec(script)?.let { File(it).absolutePath }
-    }.onFailure {
-        Log.w(TAG, "osascript 另存为失败: ${it.message}")
-    }.getOrNull()
+        // 取消 → null（不回退）；调用失败 → IOException 原样抛出（调用方决定回退）
+        return exec(script)?.let { File(it).absolutePath }
+    }
 
-    /** 跑 osascript，成功返回 stdout（trim 后）；取消/失败返回 null */
+    /**
+     * 跑 osascript。三种结果语义分明（调用方据此决定是否回退备用选择器）：
+     * - 成功 → 返回 stdout（trim 后）
+     * - 用户取消（退出码 1 + stderr -128/User canceled）→ 返回 null，**不抛异常**
+     * - 调用失败（无法启动/其它错误）→ 抛 [IOException]，调用方可回退备用方案
+     */
     private fun exec(script: String): String? {
-        val p = ProcessBuilder("osascript", "-e", script)
-            .redirectErrorStream(false)
-            .start()
+        val p = try {
+            ProcessBuilder("osascript", "-e", script)
+                .redirectErrorStream(false)
+                .start()
+        } catch (e: java.io.IOException) {
+            Log.w(TAG, "osascript 无法启动: ${e.message}")
+            throw java.io.IOException("osascript 无法启动：${e.message}", e)
+        }
         val out = p.inputStream.bufferedReader().readText()
         val err = p.errorStream.bufferedReader().readText()
         if (!p.waitFor(WAIT_HOURS, TimeUnit.HOURS)) {
             runCatching { p.destroyForcibly() }
             Log.w(TAG, "osascript 超时未完成")
-            return null
+            throw java.io.IOException("选择器超时未完成")
         }
-        return if (p.exitValue() == 0) {
-            out.trim().takeIf { it.isNotBlank() }
-        } else {
-            // 用户取消时 osascript 退出码 1，stderr 含 "User canceled"/"-128"
-            if (!err.contains("-128") && !err.contains("User canceled")) {
-                Log.w(TAG, "osascript 退出码 ${p.exitValue()}: ${err.take(120)}")
-            }
-            null
+        if (p.exitValue() != 0) {
+            // 用户取消：退出码 1，stderr 含 "User canceled"/"-128" —— 正常取消，静默返回 null
+            val cancelled = err.contains("-128") || err.contains("User canceled")
+            if (cancelled) return null
+            Log.w(TAG, "osascript 退出码 ${p.exitValue()}: ${err.take(120)}")
+            throw java.io.IOException("选择器异常退出（${p.exitValue()}）：${err.take(120)}")
         }
+        return out.trim().takeIf { it.isNotBlank() }
     }
 }

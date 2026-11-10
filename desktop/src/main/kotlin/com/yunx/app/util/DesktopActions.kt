@@ -224,9 +224,14 @@ object DesktopActions {
         if (isMac) {
             // ★ mac：用 osascript 的系统原生面板（位置/外观与原生应用一致）。
             //   AWT FileDialog 在 jpackage+Compose 下恒定位到屏幕外；JNA 直调 NSOpenPanel
-            //   受 OS 主线程限制不可行。失败回退 JFileChooser。
-            MacNativeDialogs.pick(directories = true, defaultDir = defaultDownloadDir)?.let { return it }
-            return swingDirectoryChooser()
+            //   受 OS 主线程限制不可行。
+            //   回退语义：仅 osascript **无法启动/异常退出**（IOException）才回退 Swing 选择器；
+            //   用户取消返回 null（不回退，否则取消后还会弹第二个对话框）。
+            return try {
+                MacNativeDialogs.pick(directories = true, defaultDir = defaultDownloadDir)
+            } catch (e: java.io.IOException) {
+                swingDirectoryChooser()
+            }
         }
 
         if (WindowsTitleBar.isWindows) {
@@ -375,7 +380,11 @@ object DesktopActions {
     private fun awtPickFile(title: String): String? = onEdt {
         // ★ Mac 移植：mac 走 osascript 系统原生面板，失败回退 JFileChooser
         if (isMacOS) {
-            val native = MacNativeDialogs.pick(directories = false, defaultDir = defaultDownloadDir)
+            val native = try {
+                MacNativeDialogs.pick(directories = false, defaultDir = defaultDownloadDir)
+            } catch (e: java.io.IOException) {
+                null
+            }
             if (native != null) return@onEdt native
             try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
             val chooser = JFileChooser(FileSystemView.getFileSystemView())
@@ -398,7 +407,11 @@ object DesktopActions {
     private fun awtSaveFile(defaultName: String, title: String): String? = onEdt {
         // ★ Mac 移植：mac 走 osascript 原生「另存为」，失败回退 JFileChooser
         if (isMacOS) {
-            val native = MacNativeDialogs.save(defaultName, defaultDir = defaultDownloadDir)
+            val native = try {
+                MacNativeDialogs.save(defaultName, defaultDir = defaultDownloadDir)
+            } catch (e: java.io.IOException) {
+                null
+            }
             if (native != null) return@onEdt native
             try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) } catch (_: Exception) {}
             val chooser = JFileChooser(FileSystemView.getFileSystemView())
