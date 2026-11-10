@@ -276,21 +276,29 @@ fun main(args: Array<String>) {
                         java.io.File(p).parentFile?.parentFile
                             ?.takeIf { it.isDirectory && it.name.endsWith(".app") }
                     }
-                    for (delayMs in longArrayOf(150, 400, 900)) {
-                        kotlinx.coroutines.delay(delayMs)
-                        runCatching {
-                            window.toFront()
-                            window.requestFocus()
-                        }
-                        runCatching {
-                            com.yunx.app.util.MacAppActivation.activateIgnoringOtherApps()
-                        }
-                        // 发布包：open -a 让 LaunchServices 正规激活（不会二次启动新实例）
-                        if (appBundle != null) {
+                    // 启动期持续校正窗口焦点：首个 8 秒内每 500ms 检查一次 window.isFocused，
+                    // 未获得焦点就重新 toFront+requestFocus（含 NSApp 激活兜底）。
+                    // 原因：窗口出现初期 key 状态未稳定时，用户的第一次点击会被 macOS
+                    // 拿去激活窗口（click-through 保护），表现为「要点两次」。
+                    var hadFocus = false
+                    repeat(16) {
+                        kotlinx.coroutines.delay(500)
+                        if (!window.isFocused) {
                             runCatching {
-                                ProcessBuilder("open", "-a", appBundle.absolutePath).start()
+                                window.toFront()
+                                window.requestFocus()
                             }
+                            runCatching { com.yunx.app.util.MacAppActivation.activateIgnoringOtherApps() }
+                            if (appBundle != null) {
+                                runCatching { ProcessBuilder("open", "-a", appBundle.absolutePath).start() }
+                            }
+                        } else {
+                            hadFocus = true
+                            if (it > 4) return@LaunchedEffect // 已稳定获得焦点，提前结束
                         }
+                    }
+                    if (!hadFocus) {
+                        com.yunx.app.util.Log.w("YunX-Focus", "启动 8 秒内窗口始终未获得焦点")
                     }
                 }
             }
