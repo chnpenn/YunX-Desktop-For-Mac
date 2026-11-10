@@ -124,7 +124,9 @@ fun VideoPreviewOverlay(media: VideoMedia?, onDismiss: () -> Unit) {
     // 「自动」模式下本机没有 ffplay → 首次预览时问一次是否下载引擎（选「暂不」继续用内置预览）。
     // 强制 FFPLAY 模式不在此提示：[FfplayPlayer] 自己有下载引导；强制内置 JavaFX 是用户明确选择。
     LaunchedEffect(shown) {
-        if (!ffplayMode && SettingsRepository().previewEngine == SettingsRepository.PREVIEW_AUTO) {
+        // ★ Mac 移植：mac 的 AUTO 默认即内置 JavaFX，不引导下载 ffplay 引擎
+        //   （用户想用 ffplay 可在设置里显式切换，届时 FfplayPlayer 自有下载引导）
+        if (!IS_MACOS && !ffplayMode && SettingsRepository().previewEngine == SettingsRepository.PREVIEW_AUTO) {
             EngineInstallPrompt.ask(EngineInstallPrompt.Reason.PREVIEW)
         }
     }
@@ -797,19 +799,27 @@ private fun prepareSource(media: VideoMedia): PreviewSource? {
     return PreviewSource.Local(session)
 }
 
+private val IS_MACOS: Boolean =
+    System.getProperty("os.name", "").lowercase().contains("mac")
+
 /**
  * 是否走 ffplay（真·在线预览）。
  *
  * - 设置里选了「内置 JavaFX」→ 一律 false，尊重用户选择；
  * - 选了「FFplay」→ 一律 true（本机没有 ffplay 时由 [FfplayPlayer] 展示下载引导，不偷偷回退）；
- * - 默认「自动」→ 检测到 ffplay 才走 ffplay，否则回退内置 JavaFX。
+ * - 默认「自动」→ Windows 检测到 ffplay 才走 ffplay，否则回退内置 JavaFX。
+ *
+ * ★ Mac 移植：「自动」在 mac 上**默认走内置 JavaFX 应用内预览**——mac 的 ffplay 是
+ *   独立窗口（跨进程 NSWindow 嵌入不可行，见 docs/mac-preview-embed-research.md），
+ *   且内置模式经 Mp4PreviewSession/HlsPreviewSession 落地本地文件，自定义请求头问题
+ *   已解决。用户在设置里显式选「FFplay」仍可用（独立窗口形态）。
  */
 private fun resolveUseFfplay(): Boolean = when (
     SettingsRepository().previewEngine
 ) {
     SettingsRepository.PREVIEW_JAVA_FX -> false
     SettingsRepository.PREVIEW_FFPLAY -> true
-    else -> FfplayManager.locate() != null
+    else -> !IS_MACOS && FfplayManager.locate() != null
 }
 
 private const val TAG = "YunX-VideoPreview"
