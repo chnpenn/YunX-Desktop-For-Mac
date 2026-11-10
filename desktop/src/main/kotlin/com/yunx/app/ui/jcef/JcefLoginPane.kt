@@ -299,6 +299,14 @@ fun JcefLoginPane(
 private class BrowserHolder(val client: CefClient, val browser: CefBrowser)
 
 /**
+ * ★ Mac 移植：一键导入浏览器 Cookie 的 mac 开关（当前屏蔽）。
+ * 夸克 / UC 两个平台已实测打通（发现 Chrome → Keychain 解密 → 32B 信封剥离 → 校验入库），
+ * 其余平台（百度 / 139 / 115 / 123 / 蓝奏等）的凭证键与校验链路未逐一验证，统一先不放开。
+ * 后续放开：改回 true，或按 platform 白名单（QUARK / UC 先行）精细控制。
+ */
+private const val MAC_BROWSER_COOKIE_IMPORT_ENABLED = false
+
+/**
  * 从全局 Cookie 管理器收集目标域 Cookie；必需键齐全时返回 "k=v; ..." 串。
  *
  * JCEF 的 visitAllCookies 是**异步**的：CefCookieVisitor.visit 回调在 CEF IO 线程执行，
@@ -352,6 +360,15 @@ fun AutoImportCookieButton(
     onSaved: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // ★ Mac 移植：一键导入浏览器 Cookie 在 mac 上整体屏蔽（仅夸克/UC 实测可用，
+    //   其余平台的凭证格式与校验未验证通过，点导入只会得到「没有凭证」的困扰）。
+    //   ★ 放开方式：把下面的开关改回 true 即可；想只放开部分平台，可改为按 platform 白名单判断。
+    if (System.getProperty("os.name", "").lowercase().contains("mac") &&
+        !MAC_BROWSER_COOKIE_IMPORT_ENABLED
+    ) {
+        return
+    }
+
     val scope = rememberCoroutineScope()
     var show by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
