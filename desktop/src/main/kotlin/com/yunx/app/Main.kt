@@ -265,17 +265,30 @@ fun main(args: Array<String>) {
             //   mac 上 JCEF 是阻塞式初始化（窗口显示前先起 Chromium，数秒），期间 app 已激活；
             //   窗口真正出现时 macOS 不一定把它设为 key——用户「第一次点击」会被系统拿去激活窗口
             //   （click-through 保护），落到控件上要等第二次。
-            //   两段式修复：① Java 层 toFront+requestFocus；② 原生层 [NSApp activateIgnoringOtherApps:]
-            //   把 NSApplication 强制置 active（连应用级激活过期也一并覆盖）。
+            //   三段式修复：① Java 层 toFront+requestFocus；② 原生层 [NSApp activateIgnoringOtherApps:]
+            //   激活应用；③ `open -a` 自我唤起（LaunchServices，最可靠，兼把主窗口带回最前）。
+            //   窗口显示初期有竞态，150/400/900ms 各试一轮。
             androidx.compose.runtime.LaunchedEffect(Unit) {
                 if (System.getProperty("os.name", "").lowercase().contains("mac")) {
-                    kotlinx.coroutines.delay(150)
-                    runCatching {
-                        window.toFront()
-                        window.requestFocus()
+                    val appBundle = System.getProperty("jpackage.app-path")?.let { p ->
+                        java.io.File(p).parentFile?.parentFile
+                            ?.takeIf { it.isDirectory && it.name.endsWith(".app") }
                     }
-                    runCatching {
-                        com.yunx.app.util.MacAppActivation.activateIgnoringOtherApps()
+                    for (delayMs in longArrayOf(150, 400, 900)) {
+                        kotlinx.coroutines.delay(delayMs)
+                        runCatching {
+                            window.toFront()
+                            window.requestFocus()
+                        }
+                        runCatching {
+                            com.yunx.app.util.MacAppActivation.activateIgnoringOtherApps()
+                        }
+                        // 发布包：open -a 让 LaunchServices 正规激活（不会二次启动新实例）
+                        if (appBundle != null) {
+                            runCatching {
+                                ProcessBuilder("open", "-a", appBundle.absolutePath).start()
+                            }
+                        }
                     }
                 }
             }
@@ -350,15 +363,22 @@ fun main(args: Array<String>) {
                         else exitApplication()
                     },
                     onMinimizeToTray = {
-                        // 记录当前窗口位置，再隐藏（下次启动「上次关闭位置」可还原）
+                        // 记录当前窗口位置（下次启动「上次关闭位置」可还原）
                         saveWindowPosition(mainWindow)
-                        // 隐藏窗口前先抑制关闭请求，避免 Compose 把 hide 当作 close 重跑逻辑
-                        suppressCloseRequest = true
-                        mainWindow?.isVisible = false
-                        // 延迟解除抑制（确保 hide 事件已消费完毕）
-                        scope.launch {
-                            kotlinx.coroutines.delay(50)
-                            suppressCloseRequest = false
+                        if (System.getProperty("os.name", "").lowercase().contains("mac")) {
+                            // ★ Mac 移植：不走「隐藏窗口」——Compose 会把外部 isVisible 改动回滚，
+                            //   且托盘 AWT 菜单唤回不可靠，用户会陷入「窗口消失且打不开」。
+                            //   改为标准「最小化到 Dock」，点 Dock 图标即可恢复（macOS 原生习惯）。
+                            mainWindow?.extendedState = java.awt.Frame.ICONIFIED
+                        } else {
+                            // 隐藏窗口前先抑制关闭请求，避免 Compose 把 hide 当作 close 重跑逻辑
+                            suppressCloseRequest = true
+                            mainWindow?.isVisible = false
+                            // 延迟解除抑制（确保 hide 事件已消费完毕）
+                            scope.launch {
+                                kotlinx.coroutines.delay(50)
+                                suppressCloseRequest = false
+                            }
                         }
                     }
                 )

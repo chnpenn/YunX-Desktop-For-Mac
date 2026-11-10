@@ -220,9 +220,10 @@ object DesktopActions {
         val isMac = osName.contains("mac") || osName.contains("darwin")
 
         if (isMac) {
-            val dialog = FileDialog(null as Frame?, "选择文件夹", FileDialog.LOAD)
+            val dialog = FileDialog(dialogParent(), "选择文件夹", FileDialog.LOAD)
             dialog.isMultipleMode = false
             System.setProperty("apple.awt.fileDialogForDirectories", "true")
+            runCatching { dialog.isAlwaysOnTop = true }
             dialog.isVisible = true
             val dir = dialog.directory
             val file = dialog.file
@@ -327,9 +328,19 @@ object DesktopActions {
         return awtSaveFile(defaultName, title)
     }
 
+    /**
+     * ★ Mac 移植：给 AWT 文件对话框找父窗口。
+     * 无父窗口的 FileDialog 在 mac 上可能落到 JCEF 重量级画布/主窗口**后面**——
+     * 对话框是模态的，看不见就只能干等，表现为「点了没反应、整个应用卡住」。
+     * 挂上主窗口作父 + 置前，保证弹在最前。
+     */
+    private fun dialogParent(): Frame? =
+        java.awt.Window.getWindows().filterIsInstance<Frame>().firstOrNull { it.isVisible }
+
     /** AWT 旧式文件选择对话框（Windows COM 不可用 / 非 Windows 回退） */
     private fun awtPickFile(title: String): String? {
-        val dialog = FileDialog(null as Frame?, title, FileDialog.LOAD)
+        val dialog = FileDialog(dialogParent(), title, FileDialog.LOAD)
+        runCatching { dialog.isAlwaysOnTop = true }
         dialog.isVisible = true
         val dir = dialog.directory
         val file = dialog.file
@@ -339,9 +350,10 @@ object DesktopActions {
 
     /** AWT 旧式另存为对话框（Windows COM 不可用 / 非 Windows 回退） */
     private fun awtSaveFile(defaultName: String, title: String): String? {
-        val dialog = FileDialog(null as Frame?, title, FileDialog.SAVE)
+        val dialog = FileDialog(dialogParent(), title, FileDialog.SAVE)
         dialog.file = defaultName
         dialog.directory = defaultDownloadDir.absolutePath
+        runCatching { dialog.isAlwaysOnTop = true }
         dialog.isVisible = true
         val dir = dialog.directory
         val file = dialog.file
