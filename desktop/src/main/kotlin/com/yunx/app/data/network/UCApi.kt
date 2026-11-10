@@ -15,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import com.yunx.app.util.Log
 import java.net.URLEncoder
 
 /**
@@ -81,6 +82,22 @@ class UCApi(
         private set
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    /**
+     * UC 服务端错误消息 → 用户可见文案。
+     *
+     * 未实名账号取链/校验时，服务端返回的 message 形如 "user NOT real name"，
+     * 用户完全看不懂。命中时把用户可见文案替换为实名认证引导；**原始报错
+     * 保持原样写入日志**（Log.w），便于排查与服务端字段变更后快速定位。
+     */
+    private fun friendlyMessage(raw: String, fallback: String): String {
+        val message = raw.ifBlank { fallback }
+        if (message.contains("user NOT real name", ignoreCase = true)) {
+            Log.w("UCApi", "UC 服务端报未实名（原始 message=$message）→ 已替换为实名引导文案")
+            return "UC 账号未完成实名认证，请前往 UC 官网完成实名认证后重试"
+        }
+        return message
+    }
 
     // ---------- 账号 ----------
 
@@ -384,7 +401,7 @@ class UCApi(
             throw QuarkApiException("响应解析失败")
         }
         if (json.optInt("status") != 200) {
-            throw QuarkApiException(json.optString("message").ifBlank { "获取下载链接失败" })
+            throw QuarkApiException(friendlyMessage(json.optString("message"), "获取下载链接失败"))
         }
         val item = json.optJSONArray("data")?.optJSONObject(0)
             ?: throw QuarkApiException("未返回下载链接")
@@ -451,7 +468,7 @@ class UCApi(
         23018 -> "该文件超出游客可获取的大小上限，请先登录 UC 网盘再下载"
         14001 -> "分享已失效或提取码有误，请重新解析"
         41020 -> "文件令牌已过期，请重新解析分享"
-        else -> message.ifBlank { "获取下载链接失败" }
+        else -> friendlyMessage(message, "获取下载链接失败")
     }
 
     /** 从响应 Set-Cookie 里取出游客态令牌，返回可直接当 Cookie 头用的 `__pugs=值`；没有则 null */
@@ -483,7 +500,7 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
         }
         if (json.optInt("status") != 200 && json.optInt("code") != 0) {
             throw QuarkApiException(
-                json.optString("message").ifBlank { "获取下载链接失败" },
+                friendlyMessage(json.optString("message"), "获取下载链接失败"),
                 json.optInt("code")
             )
         }
@@ -543,7 +560,7 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
         }
         if (json.optInt("status") != 200 && json.optInt("code") != 0) {
             throw QuarkApiException(
-                json.optString("message").ifBlank { "获取下载链接失败" },
+                friendlyMessage(json.optString("message"), "获取下载链接失败"),
                 json.optInt("code")
             )
         }
@@ -858,7 +875,7 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
             throw QuarkApiException("响应解析失败（HTTP ${response.code}）")
         }
         if (json.optInt("status") != 200) {
-            throw QuarkApiException(json.optString("message").ifBlank { "请求失败" })
+            throw QuarkApiException(friendlyMessage(json.optString("message"), "请求失败"))
         }
         return parser(json.optJSONObject("data") ?: throw QuarkApiException("响应缺少 data"))
     }
