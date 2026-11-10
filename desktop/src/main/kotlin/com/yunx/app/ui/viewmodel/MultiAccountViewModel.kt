@@ -8,9 +8,7 @@ import com.yunx.app.data.db.MultiAccountEntity
 import com.yunx.app.data.download.DownloadPlatform
 import com.yunx.app.data.repository.AccountDirectory
 import com.yunx.app.util.CookieCleaner
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.reflect.KClass
 
@@ -26,16 +24,12 @@ class MultiAccountViewModel(
 ) : ViewModel() {
 
     /** 按平台缓存的账号列表：Compose 重组时不能每次都新建 Flow（会丢状态、重复查库） */
-    private val caches = mutableMapOf<String, StateFlow<List<MultiAccountEntity>>>()
+    private val caches = mutableMapOf<String, StateFlow<List<MultiAccountEntity>?>>()
 
-    /** 该平台全部已登录账号（主账号在前） */
-    fun accountsOf(platform: String): StateFlow<List<MultiAccountEntity>> =
+    /** 该平台全部已登录账号（主账号在前）；null 表示尚未加载，不能视作账号已清空。 */
+    fun accountsOf(platform: String): StateFlow<List<MultiAccountEntity>?> =
         caches.getOrPut(platform) {
-            directory.observe(platform).stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = emptyList()
-            )
+            directory.observe(platform).shareAccountList(viewModelScope)
         }
 
     fun setPrimary(platform: String, id: String) {

@@ -603,172 +603,202 @@ fun DriveScreen(
 
     // 已登录夸克：点击卡片弹出账号信息底部弹窗（多账号）
     if (showQuarkSheet && quarkAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.QUARK).collectAsState()
-        QuarkAccountSheet(
-            account = quarkAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.QUARK, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.QUARK, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.QUARK, it) },
-            onAddAccount = {
-                showQuarkSheet = false
-                onAddAccount(DownloadPlatform.QUARK)
-            },
-            onDismiss = { showQuarkSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.QUARK).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            QuarkAccountSheet(
+                account = quarkAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.QUARK, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.QUARK, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.QUARK, it) },
+                onAddAccount = {
+                    showQuarkSheet = false
+                    onAddAccount(DownloadPlatform.QUARK)
+                },
+                onDismiss = { showQuarkSheet = false }
+            )
+        }
     }
 
     // 已登录 UC：点击卡片弹出账号信息底部弹窗（多账号）
     if (showUCSheet && ucAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.UC).collectAsState()
-        UCAccountSheet(
-            account = ucAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.UC, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.UC, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.UC, it) },
-            onAddAccount = {
-                showUCSheet = false
-                onAddAccount(DownloadPlatform.UC)
-            },
-            onDismiss = { showUCSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.UC).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            UCAccountSheet(
+                account = ucAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.UC, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.UC, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.UC, it) },
+                onAddAccount = {
+                    showUCSheet = false
+                    onAddAccount(DownloadPlatform.UC)
+                },
+                onDismiss = { showUCSheet = false }
+            )
+        }
     }
 
     // 已登录迅雷：点击卡片弹出账号信息底部弹窗（多账号）
     if (showXunleiSheet && xunleiAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.XUNLEI).collectAsState()
-        XunleiAccountSheet(
-            account = xunleiAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.XUNLEI, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.XUNLEI, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.XUNLEI, it) },
-            onAddAccount = {
-                showXunleiSheet = false
-                onAddAccount(DownloadPlatform.XUNLEI)
-            },
-            onDismiss = { showXunleiSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.XUNLEI).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            XunleiAccountSheet(
+                account = xunleiAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.XUNLEI, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.XUNLEI, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.XUNLEI, it) },
+                onAddAccount = {
+                    showXunleiSheet = false
+                    onAddAccount(DownloadPlatform.XUNLEI)
+                },
+                onDismiss = { showXunleiSheet = false }
+            )
+        }
     }
 
     // 已登录百度：点击卡片弹出账号信息底部弹窗（多账号）
     if (showBaiduSheet && baiduAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.BAIDU).collectAsState()
-        BaiduAccountSheet(
-            account = baiduAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.BAIDU, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.BAIDU, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.BAIDU, it) },
-            onAddAccount = {
-                showBaiduSheet = false
-                onAddAccount(DownloadPlatform.BAIDU)
-            },
-            onDismiss = { showBaiduSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.BAIDU).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            BaiduAccountSheet(
+                account = baiduAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.BAIDU, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.BAIDU, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.BAIDU, it) },
+                onAddAccount = {
+                    showBaiduSheet = false
+                    onAddAccount(DownloadPlatform.BAIDU)
+                },
+                onDismiss = { showBaiduSheet = false }
+            )
+        }
     }
 
     // 已登录 139：点击卡片弹出账号信息底部弹窗（多账号）
     if (showC139Sheet && c139Account != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.C139).collectAsState()
-        C139AccountSheet(
-            account = c139Account,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.C139, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.C139, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.C139, it) },
-            onAddAccount = {
-                showC139Sheet = false
-                onAddAccount(DownloadPlatform.C139)
-            },
-            onDismiss = { showC139Sheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.C139).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            C139AccountSheet(
+                account = c139Account,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.C139, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.C139, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.C139, it) },
+                onAddAccount = {
+                    showC139Sheet = false
+                    onAddAccount(DownloadPlatform.C139)
+                },
+                onDismiss = { showC139Sheet = false }
+            )
+        }
     }
 
     // 已登录 123：点击卡片弹出账号信息底部弹窗（多账号）
     if (showPan123Sheet && pan123Account != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.PAN123).collectAsState()
-        Pan123AccountSheet(
-            account = pan123Account,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.PAN123, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.PAN123, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.PAN123, it) },
-            onAddAccount = {
-                showPan123Sheet = false
-                onAddAccount(DownloadPlatform.PAN123)
-            },
-            onDismiss = { showPan123Sheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.PAN123).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            Pan123AccountSheet(
+                account = pan123Account,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.PAN123, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.PAN123, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.PAN123, it) },
+                onAddAccount = {
+                    showPan123Sheet = false
+                    onAddAccount(DownloadPlatform.PAN123)
+                },
+                onDismiss = { showPan123Sheet = false }
+            )
+        }
     }
 
     // 已登录 115：点击卡片弹出账号信息底部弹窗（多账号）
     if (showPan115Sheet && pan115Account != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.PAN115).collectAsState()
-        Pan115AccountSheet(
-            account = pan115Account,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.PAN115, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.PAN115, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.PAN115, it) },
-            onAddAccount = {
-                showPan115Sheet = false
-                onAddAccount(DownloadPlatform.PAN115)
-            },
-            onDismiss = { showPan115Sheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.PAN115).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            Pan115AccountSheet(
+                account = pan115Account,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.PAN115, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.PAN115, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.PAN115, it) },
+                onAddAccount = {
+                    showPan115Sheet = false
+                    onAddAccount(DownloadPlatform.PAN115)
+                },
+                onDismiss = { showPan115Sheet = false }
+            )
+        }
     }
 
     // 已登录光鸭云盘：点击卡片弹出账号信息底部弹窗（多账号）
     if (showGuangYaSheet && guangyaAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.GUANGYA).collectAsState()
-        GuangYaAccountSheet(
-            account = guangyaAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.GUANGYA, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.GUANGYA, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.GUANGYA, it) },
-            onAddAccount = {
-                showGuangYaSheet = false
-                onAddAccount(DownloadPlatform.GUANGYA)
-            },
-            onDismiss = { showGuangYaSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.GUANGYA).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            GuangYaAccountSheet(
+                account = guangyaAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.GUANGYA, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.GUANGYA, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.GUANGYA, it) },
+                onAddAccount = {
+                    showGuangYaSheet = false
+                    onAddAccount(DownloadPlatform.GUANGYA)
+                },
+                onDismiss = { showGuangYaSheet = false }
+            )
+        }
     }
 
     // 已登录蓝奏云优享版：点击卡片弹出账号信息底部弹窗（多账号）
     if (showILanzouSheet && ilanzouAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.ILANZOU).collectAsState()
-        ILanzouAccountSheet(
-            account = ilanzouAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.ILANZOU, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.ILANZOU, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.ILANZOU, it) },
-            onAddAccount = {
-                showILanzouSheet = false
-                onAddAccount(DownloadPlatform.ILANZOU)
-            },
-            onDismiss = { showILanzouSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.ILANZOU).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            ILanzouAccountSheet(
+                account = ilanzouAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.ILANZOU, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.ILANZOU, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.ILANZOU, it) },
+                onAddAccount = {
+                    showILanzouSheet = false
+                    onAddAccount(DownloadPlatform.ILANZOU)
+                },
+                onDismiss = { showILanzouSheet = false }
+            )
+        }
     }
 
     // 已登录蓝奏云：点击卡片弹出账号信息底部弹窗（多账号）
     if (showLanzouSheet && lanzouAccount != null) {
-        val accounts by multiAccount.accountsOf(DownloadPlatform.LANZOU).collectAsState()
-        LanzouAccountSheet(
-            account = lanzouAccount,
-            accounts = accounts,
-            onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.LANZOU, it) },
-            onRename = { id, remark -> multiAccount.rename(DownloadPlatform.LANZOU, id, remark) },
-            onRemove = { multiAccount.remove(DownloadPlatform.LANZOU, it) },
-            onAddAccount = {
-                showLanzouSheet = false
-                onAddAccount(DownloadPlatform.LANZOU)
-            },
-            onDismiss = { showLanzouSheet = false }
-        )
+        val accounts = multiAccount.accountsOf(DownloadPlatform.LANZOU).collectAsState().value
+        // 尚未加载时不创建面板，避免占位空列表触发 onEmpty 自动关闭。
+        if (accounts != null) {
+            LanzouAccountSheet(
+                account = lanzouAccount,
+                accounts = accounts,
+                onSetPrimary = { multiAccount.setPrimary(DownloadPlatform.LANZOU, it) },
+                onRename = { id, remark -> multiAccount.rename(DownloadPlatform.LANZOU, id, remark) },
+                onRemove = { multiAccount.remove(DownloadPlatform.LANZOU, it) },
+                onAddAccount = {
+                    showLanzouSheet = false
+                    onAddAccount(DownloadPlatform.LANZOU)
+                },
+                onDismiss = { showLanzouSheet = false }
+            )
+        }
     }
 
     // GitHub 卡片「更多」菜单：浏览我的主页 / 配置 Token / 清除 Token（清除由上层做二次确认）

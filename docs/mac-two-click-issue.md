@@ -1,5 +1,15 @@
 # macOS「首次点击需要点击两次」问题 — 排查交接文档
 
+> **2026-11-10 更新：已定位并修复网盘首页三点按钮的首次打开问题。** 下文原排查记录保留为历史，其中焦点/acceptsFirstMouse 推断并非此次根因。
+>
+> 根因：`MultiAccountViewModel.accountsOf()` 的 `stateIn` 初始值是 `emptyList()`；首次点击才开始订阅时，`AccountListSection` 将这个加载占位当成“账号已清空”，触发 `onEmpty -> onDismiss`，面板在显示前就关闭。第二次点击时账号已缓存，因此正常打开。用户补充确认：仅软件启动后网盘首页三点首次点击受影响，切页再回来与网盘内容页三点不受影响。
+>
+> 复现：隔离 `.app` 保留 JCEF 初始化，使用真实 `QuarkAccountSheet` 和延迟 250ms 的假账号流，截图定位后通过鼠标坐标点击。首击记录 `AWT press -> release -> onClick -> sheet composed -> dismiss accounts=0 -> disposed`，第二次点击显示账号面板。无真实账号或网盘请求。
+>
+> 修复：账号列表初始 `null` 表示尚未加载，收到真实列表后才创建账号面板；真实空列表仍可触发关闭。停止订阅后清除旧缓存，避免重开时用过期空列表关闭。全部 10 个网盘账号面板共用此行为。
+>
+> 代码：`ui/viewmodel/AccountListState.kt`、`MultiAccountViewModel.kt`、`ui/screens/DriveScreen.kt`。回归：`AccountListStateTest` 覆盖首次延迟加载、删除最后账号、停订后重开。
+
 ## 一、环境
 
 - **硬件/系统**：Apple Silicon (arm64)，macOS 15 (Darwin 24.6)
