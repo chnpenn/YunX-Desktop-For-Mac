@@ -261,6 +261,19 @@ fun main(args: Array<String>) {
                         restoreWindowPosition(window as? java.awt.Frame, com.yunx.app.data.prefs.SettingsRepository().windowCustomPosition)
                 }
             }
+            // ★ Mac 移植：主动把窗口变成 key window（获得键盘焦点）。
+            //   mac 上 JCEF 是阻塞式初始化（窗口显示前先起 Chromium，数秒），期间 app 已激活；
+            //   窗口真正出现时 macOS 不一定把它设为 key——用户「第一次点击」会被系统拿去激活窗口
+            //   （click-through 保护），落到控件上要等第二次。显示后立刻 toFront+requestFocus 可消除。
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                if (System.getProperty("os.name", "").lowercase().contains("mac")) {
+                    kotlinx.coroutines.delay(150)
+                    runCatching {
+                        window.toFront()
+                        window.requestFocus()
+                    }
+                }
+            }
             // 窗口出现后再后台启动 JCEF，登录页通过 browserReady 状态自动切换
             androidx.compose.runtime.LaunchedEffect(Unit) {
                 JcefHolder.initInBackground()
