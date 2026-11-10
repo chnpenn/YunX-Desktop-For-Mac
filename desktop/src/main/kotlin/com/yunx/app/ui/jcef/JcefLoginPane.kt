@@ -468,7 +468,14 @@ fun AutoImportCookieButton(
                                             scope.launch {
                                                 scanning = true
                                                 com.yunx.app.util.Log.i("YunX-Cookie-UI", "开始校验导入 Cookie(调 onSave)…")
-                                                val ok = onImported(found.cookie)
+                                                // ★ onSave 里可能有网络/解密层抛出的异常（如 OkHttp 拒绝非法
+                                                //   Cookie 头），不接住会把协程打死、scanning 卡 true、按钮全灰
+                                                val ok = try {
+                                                    onImported(found.cookie)
+                                                } catch (t: Throwable) {
+                                                    com.yunx.app.util.Log.e("YunX-Cookie-UI", "onSave 异常", t)
+                                                    false
+                                                }
                                                 com.yunx.app.util.Log.i("YunX-Cookie-UI", "onSave 返回 ok=$ok")
                                                 scanning = false
                                                 if (ok) {

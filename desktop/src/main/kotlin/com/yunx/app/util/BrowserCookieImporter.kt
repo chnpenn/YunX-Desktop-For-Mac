@@ -244,8 +244,12 @@ object BrowserCookieImporter {
             val key = factory.generateSecret(spec).encoded
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(ByteArray(16) { ' '.code.toByte() }))
-            val plain = cipher.doFinal(payload)
-            String(plain, Charsets.UTF_8)
+            val plain = String(cipher.doFinal(payload), Charsets.UTF_8)
+            // ★ 只接受可打印 ASCII 的 Cookie 值。个别埋点 Cookie（_UP_* 等）解出来是二进制，
+            //   String(UTF-8) 会产生 U+FFFD 替换符，拼进 Cookie 头时 OkHttp 直接抛
+            //   「Unexpected char 0xfffd」→ 整个导入在校验昵称一步炸掉。
+            //   登录凭证（__pus/__puus 等）都是纯 ASCII，不受影响；乱码 Cookie 主动丢弃。
+            plain.takeIf { s -> s.none { c -> c < ' ' || c > '~' } }
         }.getOrNull()
     }
 
