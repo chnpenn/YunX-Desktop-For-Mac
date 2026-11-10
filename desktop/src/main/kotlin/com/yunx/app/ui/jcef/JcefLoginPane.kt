@@ -464,16 +464,20 @@ fun AutoImportCookieButton(
                                     }
                                     Button(
                                         onClick = {
+                                            com.yunx.app.util.Log.i("YunX-Cookie-UI", "点「导入」 browser=${found.browserName} count=${found.count}")
                                             scope.launch {
                                                 scanning = true
+                                                com.yunx.app.util.Log.i("YunX-Cookie-UI", "开始校验导入 Cookie(调 onSave)…")
                                                 val ok = onImported(found.cookie)
+                                                com.yunx.app.util.Log.i("YunX-Cookie-UI", "onSave 返回 ok=$ok")
                                                 scanning = false
                                                 if (ok) {
                                                     show = false
                                                     SnackbarController.show("登录成功")
                                                     onSaved()
                                                 } else {
-                                                    errorMsg = "该 Cookie 校验失败（可能已过期），请重新登录浏览器后重试"
+                                                    errorMsg = "导入的 Cookie 中没有该网盘的登录凭证——" +
+                                                        "请先在系统浏览器里登录 $platform 官网，再回来点「导入」"
                                                 }
                                             }
                                         },
@@ -482,11 +486,15 @@ fun AutoImportCookieButton(
                                 }
                             }
                         }
-                    } else if (errorMsg != null) {
+                    }
+                    // ★ 校验失败的提示必须独立于「结果列表」显示：
+                    //   扫描有结果但点导入后校验不过（如浏览器里没登录该网盘）时，
+                    //  errorMsg 只在 else-if 尾部显示的旧写法会把它整个吞掉（表现为「点了没反应」）
+                    if (errorMsg != null) {
                         Text(
                             text = errorMsg ?: "",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
