@@ -71,8 +71,11 @@ object GopeedEngine {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
 
-    /** 启动后等待 HTTP API 就绪的上限（毫秒）；冷启动解压/建库一般 1-3 秒 */
-    private const val READY_TIMEOUT_MS = 20_000L
+    /**
+     * 启动后等待 HTTP API 就绪的上限（毫秒）。
+     * ★ mac 首次运行未签名内核会触发 Gatekeeper 校验（实测可达 20-60s），20s 会误报超时。
+     */
+    private const val READY_TIMEOUT_MS = 60_000L
 
     /** 停止时等待进程自行退出的上限（毫秒），超时强杀 */
     private const val STOP_TIMEOUT_MS = 3_000L
@@ -258,7 +261,9 @@ object GopeedEngine {
                     "引擎进程已退出（退出码 $exitCode），未能提供 HTTP 服务；" +
                         "详见子进程日志 ${log.absolutePath}"
                 } else {
-                    "启动超时（${READY_TIMEOUT_MS / 1000}s 内未响应 /api/v1/info），详见 ${log.absolutePath}"
+                    "启动超时（${READY_TIMEOUT_MS / 1000}s 内未响应 /api/v1/info）。" +
+                        "mac 首次运行内核需要通过系统安全校验，可稍等几秒再次点击「重启引擎」重试；" +
+                        "详见子进程日志 ${log.absolutePath}"
                 }
                 lastError = detail
                 throw IllegalStateException(detail)
