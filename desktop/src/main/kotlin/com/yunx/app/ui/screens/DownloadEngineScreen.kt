@@ -358,12 +358,8 @@ fun DownloadEngineScreen(
             EngineCard(
                 icon = { Icon(Icons.Outlined.Memory, contentDescription = null) },
                 title = "内置分片下载器",
-                description = "处理 HTTP 直链任务：Range 并发分片、断点续传、自适应分片、慢连接抢占，支持镜像回退与全局限速。" +
-                    "磁力 / ed2k / BT 种子任务不受此选择影响，自动由 Gopeed 引擎处理（需已安装内核）。",
-                active = currentEngine == SettingsRepository.ENGINE_BUILTIN,
-                onSwitch = if (currentEngine != SettingsRepository.ENGINE_BUILTIN) {
-                    { switchEngine(SettingsRepository.ENGINE_BUILTIN) }
-                } else null
+                description = "处理 HTTP 直链任务：Range 并发分片、断点续传、自适应分片、慢连接抢占，支持镜像回退与全局限速。",
+                active = true
             )
 
             Spacer(Modifier.height(12.dp))
@@ -373,12 +369,9 @@ fun DownloadEngineScreen(
                 icon = { Icon(Icons.Outlined.Speed, contentDescription = null) },
                 title = "Gopeed 引擎",
                 badge = "实验性",
-                description = "接管 HTTP 多连接下载与全部 P2P 任务（磁力 / ed2k / BT 种子——自动路由，无需手动切换）。" +
-                    "引擎不支持下载限速、失败重试与镜像回退，GitHub 下载仍走内置引擎。",
-                active = currentEngine == SettingsRepository.ENGINE_GOPEED,
-                onSwitch = if (currentEngine != SettingsRepository.ENGINE_GOPEED) {
-                    { switchEngine(SettingsRepository.ENGINE_GOPEED) }
-                } else null
+                description = "自动处理全部 P2P 任务（磁力 / ed2k / BT 种子，需已安装内核）。" +
+                    "内核安装后按需启动，无需手动管理。不支持下载限速与镜像回退，GitHub 下载仍走内置引擎。",
+                active = false
             ) {
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -895,14 +888,17 @@ private fun KernelLinkRow(label: String, url: String, onCopy: (String) -> Unit) 
     }
 }
 
-/** 引擎卡片：标题 + 说明 + 当前状态按钮 + 可选扩展内容 */
+/**
+ * 引擎卡片：标题 + 说明 + 状态徽章 + 可选扩展内容。
+ * ★ 方案 A：不再提供「切换」按钮——HTTP 任务固定走内置，P2P 任务自动走 Gopeed（装内核即生效），
+ *   没有用户可切换的东西；卡片右上角以徽章展示各引擎当前承担的职责。
+ */
 @Composable
 private fun EngineCard(
     icon: @Composable () -> Unit,
     title: String,
     description: String,
     active: Boolean,
-    onSwitch: (() -> Unit)? = null,
     badge: String? = null,
     content: (@Composable () -> Unit)? = null
 ) {
@@ -922,6 +918,19 @@ private fun EngineCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                Spacer(Modifier.width(8.dp))
+                // 职责徽章：本引擎承担的任务类型（方案 A 后固定,不可切换）
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Text(
+                        text = if (active) "HTTP 任务" else "P2P 任务",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
                 if (badge != null) {
                     Spacer(Modifier.width(8.dp))
                     Surface(
@@ -943,18 +952,6 @@ private fun EngineCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(12.dp))
-            if (active) {
-                // ★ 方案 A：P2P 任务自动路由后,当前引擎卡片显示语义化的禁用态说明,
-                //   不再显示可能误导的「切换到此引擎」按钮(另一引擎描述里已写清分工)
-                OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                    Text("使用中（HTTP 任务 · 磁力 / ed2k / 种子自动路由）")
-                }
-            } else if (onSwitch != null) {
-                OutlinedButton(onClick = onSwitch, modifier = Modifier.fillMaxWidth()) {
-                    Text("切换到此引擎")
-                }
-            }
             content?.invoke()
         }
     }
@@ -979,7 +976,7 @@ private fun KeyValueRow(label: String, value: String) {
 
 private fun engineStateLabel(state: GopeedEngine.State): String = when (state) {
     GopeedEngine.State.NOT_INSTALLED -> "未导入内核"
-    GopeedEngine.State.INSTALLED -> "已导入，未启动"
+    GopeedEngine.State.INSTALLED -> "已就绪（按需自动启动）"
     GopeedEngine.State.RUNNING -> "运行中"
 }
 
