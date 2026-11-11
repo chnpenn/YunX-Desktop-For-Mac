@@ -96,8 +96,6 @@ macOS 移植版基于上游 Windows 版代码：核心逻辑（解析协议、Ra
 
 ## 支持开发
 
-- **Mac 版赞赏**：应用内「支持开发」页面扫码（微信赞赏码）
-- **上游作者赞赏**：上游「支持开发」页可见安卓版作者（CYQawa）与桌面端作者（tidain）的赞赏码
 - **Star**：给 [本仓库](https://github.com/chnpenn/YunX-Desktop-For-Mac) 与 [上游](https://github.com/tidain/YunX-Desktop) 各点个 Star ⭐
 - **Issues**：macOS 移植 Bug 或建议欢迎反馈
 
