@@ -1,0 +1,60 @@
+name: Release macOS DMG
+
+# 推送 v* 标签时自动：构建 DMG → 创建 Release 并上传资产
+# 用法：git tag v1.3.4 && git push origin v1.3.4
+# （所有构建都在 GitHub 服务器上完成，彻底绕开本地直传 GitHub 的慢速通道）
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-14          # Apple Silicon runner，与发布目标（arm64 原生）一致
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build DMG
+        run: ./gradlew :desktop:packageDmg --no-daemon
+        # packageDmg 内含 copyDmgToDownloads → rebuild-dmg-with-apps-link.sh
+        # （补 Applications 快捷方式），产物在 desktop/build/compose/binaries/main/dmg/
+
+      - name: Resolve version and DMG path
+        id: meta
+        run: |
+          VERSION=$(head -1 version.txt | tr -d '[:space:]')
+          DMG="desktop/build/compose/binaries/main/dmg/YunX-Desktop-${VERSION}.dmg"
+          if [ ! -f "$DMG" ]; then
+            echo "DMG not found: $DMG"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create / update Release and upload DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: 云析 YunX-Desktop ${{ steps.meta.outputs.tag }} · macOS 移植版
+          draft: false
+          prerelease: ${{ contains(steps.meta.outputs.tag, '-beta') || contains(steps.meta.outputs.tag, '-rc') }}
+          generate_release_notes: true
+          files: ${{ steps.meta.outputs.dmg }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
