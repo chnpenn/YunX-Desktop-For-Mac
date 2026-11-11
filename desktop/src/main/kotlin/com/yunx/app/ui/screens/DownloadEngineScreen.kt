@@ -478,9 +478,10 @@ fun DownloadEngineScreen(
                     }
                 }
 
-                // BT 连接（DHT + tracker）是 Gopeed 引擎专属：只有当前引擎就是 Gopeed 时才显示，
-                // 切到内置下载器时整块隐藏——内置下载器是纯 HTTP Range 实现，这些设置对它毫无作用。
-                if (currentEngine == SettingsRepository.ENGINE_GOPEED) {
+                // BT 连接（DHT + tracker）是 Gopeed 引擎专属设置。
+                // ★ 方案 A：不再依赖「当前引擎选择」判断（引擎设置只管 HTTP 任务），
+                //   只要内核已安装就显示——磁力任务永远由引擎处理，这些设置始终有意义。
+                if (GopeedEngine.isInstalled()) {
                 // ===== BT 连接（磁力 / ed2k / 种子）：DHT + tracker 列表 =====
                 Spacer(Modifier.height(14.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
