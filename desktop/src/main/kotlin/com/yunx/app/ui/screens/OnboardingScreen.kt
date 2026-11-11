@@ -296,14 +296,14 @@ private fun WelcomePage() {
 
         Spacer(modifier = Modifier.height(26.dp))
         Text(
-            text = "云析",
+            text = "云析 Mac 版",
             style = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "YunX-Desktop · v$APP_VERSION",
+            text = "YunX-Desktop-For-Mac · v$APP_VERSION",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -335,10 +335,7 @@ private fun WelcomePage() {
         GitHubCard()
 
         Spacer(modifier = Modifier.height(12.dp))
-        // 原作者的 Windows 群信息保留，Mac 版交流群单独一行
-        QQGroupPill(label = "QQ 群 $QQ_GROUP", group = QQ_GROUP)
-
-        Spacer(modifier = Modifier.height(8.dp))
+        // ★ Mac 移植：只保留 Mac 版交流群（用户要求去掉原作者 Windows 群胶囊）
         QQGroupPill(label = "Mac 版交流群：$MAC_QQ_GROUP", group = MAC_QQ_GROUP)
     }
 }
