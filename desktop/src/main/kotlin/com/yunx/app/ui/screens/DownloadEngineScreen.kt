@@ -444,7 +444,11 @@ fun DownloadEngineScreen(
                                     r.onSuccess {
                                         SnackbarController.show("引擎已重启")
                                         refreshVersion()
-                                    }.onFailure { failure = it.message }
+                                    }.onFailure {
+                                        failure = it.message
+                                        // ★ 失败卡片在页面底部需滚动;同时弹顶部 Snackbar 即时提醒
+                                        SnackbarController.show("引擎启动失败：${(it.message ?: "未知错误").take(60)}")
+                                    }
                                 }
                             },
                             enabled = !busy,
