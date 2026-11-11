@@ -300,6 +300,11 @@ compose.desktop {
             windows {
                 perUserInstall = true
             }
+            // ★ Mac 移植：jpackage 默认给 Kotlin logo 当图标，换成云析图标
+            //   （iconutil 由 resources/icon.png 生成的多尺寸 icns）
+            macOS {
+                iconFile.set(project.file("YunX-Desktop.icns"))
+            }
             packageName = "YunX-Desktop"
             packageVersion = appVersion
             // 注意：jpackage 参数文件解析不支持非 ASCII 描述（本机报 "Input length = 1"），描述保持纯英文

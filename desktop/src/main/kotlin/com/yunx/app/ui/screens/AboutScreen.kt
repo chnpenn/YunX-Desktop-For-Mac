@@ -60,7 +60,11 @@ import com.yunx.app.data.update.UpdateChecker
 import com.yunx.app.util.DesktopActions
 
 /** QQ 交流群群号（关于页入口；桌面端无 mqqapi scheme 保证，点击复制群号供用户在 QQ 中搜索） */
-private const val QQ_GROUP = "635207650"
+// ★ Mac 移植：mac 上 QQ 群换 Mac 版交流群（1121753821）；Windows 构建保留原作者群
+private val QQ_GROUP: String by lazy {
+    if (System.getProperty("os.name", "").lowercase().contains("mac")) "1121753821"
+    else "635207650"
+}
 
 /**
  * 关于云析页：应用介绍、支持平台、功能特性、技术栈与免责声明。
@@ -174,14 +178,14 @@ private fun AppHeader(versionName: String) {
         )
         Spacer(modifier = Modifier.height(14.dp))
         Text(
-            text = "云析",
+            text = "云析 Mac 版",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.SemiBold
         )
         Spacer(modifier = Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "YunX-Desktop · v$versionName",
+                text = "YunX-Desktop-For-Mac · v$versionName",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

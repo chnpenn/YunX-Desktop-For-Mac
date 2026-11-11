@@ -90,7 +90,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** QQ 交流群群号（桌面端无 mqqapi scheme 保证，点击复制群号供用户在 QQ 中搜索） */
-private const val QQ_GROUP = "635207650"
+// ★ Mac 移植：mac 上 QQ 群换 Mac 版交流群（1121753821）；Windows 构建保留原作者群
+private val QQ_GROUP: String by lazy {
+    if (System.getProperty("os.name", "").lowercase().contains("mac")) "1121753821"
+    else "635207650"
+}
 
 /** Mac 版交流群群号（Mac 移植版维护者的群，与上游 Windows 群并存展示） */
 private const val MAC_QQ_GROUP = "1121753821"

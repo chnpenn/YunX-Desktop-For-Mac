@@ -288,7 +288,7 @@ fun SupportScreen(
             OutlinedButton(
                 onClick = {
                     DesktopActions.openUrl("https://github.com/chnpenn/YunX-Desktop-For-Mac")
-                    SnackbarController.show("已打开项目仓库")
+                    SnackbarController.show("已打开 Mac 版仓库")
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -300,7 +300,7 @@ fun SupportScreen(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("项目仓库")
+                Text("Mac 版仓库")
             }
 
             Spacer(modifier = Modifier.height(8.dp))
