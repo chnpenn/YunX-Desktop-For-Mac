@@ -885,7 +885,7 @@ class DownloadManager(
         // ★ DASH 合轨 / 动图合成只能在应用内做：引擎只会下主 URL，不会拉音轨、不会合成，
         //   所以这两类任务强制走内置下载器。
         val needsLocalPipeline = mergeAudioUrl.isNotBlank() || motionUrl.isNotBlank()
-        if (!needsLocalPipeline && shouldUseEngine(taskPlatform)) {
+        if (!needsLocalPipeline && shouldUseEngine(taskPlatform, url)) {
             startViaEngine(id, url, safeName, headers, taskPlatform, saveDir)
         } else {
             start(id, headers)
@@ -902,11 +902,11 @@ class DownloadManager(
      */
     private fun p2pBlockReason(isP2P: Boolean): String? {
         if (!isP2P) return null
+        // ★ 语义修正（方案 A）：引擎设置只管 HTTP 任务；P2P 任务（磁力 / ed2k / 种子）
+        //   内核装了就直接走引擎，不再要求用户手动「切换引擎」——内置下载器物理上不支持
+        //   这三类协议，手动切换纯属多余的门槛。
         if (!GopeedEngine.isInstalled()) {
-            return "磁力 / ed2k / BT 种子下载需要先在「设置 → 下载 → 下载引擎」里导入 Gopeed 内核"
-        }
-        if (!engineEnabledProvider()) {
-            return "磁力 / ed2k / BT 种子下载需要先在「设置 → 下载 → 下载引擎」里把下载引擎切换为 Gopeed"
+            return "磁力 / ed2k / BT 种子下载需要 Gopeed 引擎：请在「设置 → 引擎管理」安装内核（装好后磁力任务自动走引擎，无需切换）"
         }
         return null
     }
@@ -1216,11 +1216,15 @@ class DownloadManager(
     }
 
     /**
-     * 新任务是否交给外部引擎：平台不是 GitHub（引擎无法按镜像回退）、设置里选了 Gopeed、
-     * 且内核已导入。放在 enqueue 末尾统一判断，所有调用点自动生效。
+     * 新任务是否交给外部引擎。
+     * ★ 语义（方案 A）：引擎设置只管 HTTP 任务；P2P 任务（磁力 / ed2k / 种子）只要
+     *   内核已导入就一律走引擎——内置下载器无法执行这类协议，「必须手动切换」是多余门槛。
+     *   GitHub 任务引擎无法按镜像回退，仍走内置。放在 enqueue 末尾统一判断，所有调用点自动生效。
      */
-    private fun shouldUseEngine(platform: String): Boolean =
-        platform != DownloadPlatform.GITHUB && engineEnabledProvider() && GopeedEngine.isInstalled()
+    private fun shouldUseEngine(platform: String, url: String): Boolean =
+        platform != DownloadPlatform.GITHUB &&
+            (P2PLink.matches(url) || engineEnabledProvider()) &&
+            GopeedEngine.isInstalled()
 
     /** 引擎落盘基准目录：任务级覆盖优先，否则设置里的自定义下载目录，最后系统「下载」目录 */
     private fun engineBaseDir(saveDirOverride: String? = null): File =
@@ -1340,8 +1344,10 @@ class DownloadManager(
             runTaskWithRetry(id, headers)
             return
         }
-        // 引擎不可用：P2P 任务没有退路（内置下载器无法执行），按统一文案落失败；HTTP 任务回退内置
-        if (!GopeedEngine.isInstalled() || !engineEnabledProvider()) {
+        // ★ 语义同步（方案 A）：引擎设置只管 HTTP 任务。引擎不可用时：
+        //    P2P 任务没有退路（内置下载器无法执行），按统一文案落失败；
+        //    HTTP 任务若从未走过引擎则回退内置（跟随设置），否则仍回引擎（历史归属）。
+        if (!GopeedEngine.isInstalled() || (!isP2P && !engineEnabledProvider())) {
             if (isP2P) {
                 val reason = p2pBlockReason(true) ?: "下载引擎不可用"
                 dao.updateStatus(id, DownloadTaskEntity.STATUS_FAILED)
