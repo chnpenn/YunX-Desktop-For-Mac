@@ -106,7 +106,9 @@ object GopeedKernelProvisioner {
             (0 until arr.length())
                 .mapNotNull { arr.optJSONObject(it) }
                 .firstOrNull { it.optString("name").equals(wanted, ignoreCase = true) }
-        } ?: throw IllegalStateException("官方 Release（$tag）里没有内核包 $wanted")
+        } ?: throw IllegalStateException(
+            "官方 Release（$tag）里没有内核包 $wanted —— 可到 Gopeed 官网手动下载后「导入本地内核」"
+        )
         val direct = asset.optString("browser_download_url")
         if (direct.isBlank()) throw IllegalStateException("内核包缺少下载地址")
         Plan(
@@ -120,21 +122,44 @@ object GopeedKernelProvisioner {
     }
 
     private fun fetchLatestJson(): JSONObject {
-        val req = Request.Builder()
-            .url(RELEASES_LATEST_URL)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "YunX-Desktop")
-            .build()
-        return HttpClients.apiClient().newCall(req).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) {
-                Log.e(TAG, "获取官方 Release 失败：HTTP ${resp.code}")
-                throw IllegalStateException("获取官方 Release 失败（HTTP ${resp.code}）")
-            }
-            runCatching { JSONObject(text) }.getOrElse {
-                throw IllegalStateException("官方 Release 响应格式异常")
+        // ★ 直连 api.github.com 在国内网络高频 403/超时：按 GitHubMirror 的镜像前缀
+        //   生成候选列表（直连优先，镜像兜底），逐个尝试直到拿到合法 JSON。
+        //   注意 api.github.com 不能简单拼 gh-proxy 前缀——镜像代理的是 release 下载与
+        //   raw 内容，API 域名走的是另一个链路；这里只对「直连」与「gh-proxy 的 /repos/...」
+        //   两种形态做尝试（ghproxy 系对 api.github.com 同样透明转发）。
+        val candidates = mutableListOf(RELEASES_LATEST_URL)
+        GitHubMirror.PRESETS.forEach { prefix ->
+            candidates.add(prefix.removeSuffix("/") + "/" + RELEASES_LATEST_URL.removePrefix("https://"))
+        }
+        var lastCode = 0
+        for (url in candidates) {
+            val label = if (url == candidates.first()) "直连" else "镜像"
+            val req = Request.Builder()
+                .url(url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "YunX-Desktop")
+                .build()
+            try {
+                val resp = HttpClients.apiClient().newCall(req).execute()
+                val text = try { resp.body?.string().orEmpty() } finally { runCatching { resp.close() } }
+                if (!resp.isSuccessful) {
+                    lastCode = resp.code
+                    Log.w(TAG, "获取 Release 失败（$label）：HTTP ${resp.code}")
+                    continue
+                }
+                val json = runCatching { JSONObject(text) }.getOrNull()
+                if (json != null && json.optString("tag_name").isNotBlank()) {
+                    Log.i(TAG, "Release 元数据获取成功：$label")
+                    return json
+                }
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "获取 Release 网络异常：${e.message?.take(80)}")
             }
         }
+        throw IllegalStateException(
+            "获取官方 Release 失败（最后 HTTP $lastCode）——GitHub API 限流或网络不可达，" +
+                "可稍后重试，或手动从 Gopeed 官网下载内核后用「导入本地内核」导入"
+        )
     }
 
     /**

@@ -191,6 +191,8 @@ fun DownloadEngineScreen(
             } catch (e: Exception) {
                 progress = null
                 failure = e.message ?: e.javaClass.simpleName
+                // ★ 同时弹 Snackbar：失败卡片在页面底部需要滚动才能看到，顶部 Snackbar 即时可见
+                SnackbarController.show("内核获取失败：${(e.message ?: e.javaClass.simpleName).take(80)}")
             } finally {
                 busy = false
                 provisionJob = null
