@@ -39,9 +39,11 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set bounds of container window to {240, 120, 820, 500}
-        set position of item "YunX-Desktop.app" of container window to {160, 90}
-        set position of item "Applications" of container window to {380, 90}
+        set bounds of container window to {260, 130, 860, 540}
+        set icon size of container window to 128
+        set arrangement of icon view of container window to not arranged
+        set position of item "YunX-Desktop.app" of container window to {150, 80}
+        set position of item "Applications" of container window to {360, 80}
         close
     end tell
 end tell
