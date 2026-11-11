@@ -331,6 +331,8 @@ compose.desktop {
 
 // ★ Mac 移植：packageDmg 完成后自动把 DMG 复制一份到「下载」目录，方便直接安装/分发。
 // 只在 macOS 上跑；用户目录无 Downloads 时静默跳过（不影响打包本身）。
+// 复制前先用脚本重建 DMG：jpackage 产物不含「Applications」快捷方式（用户打开 DMG
+// 后无处可拖、没法安装），脚本会挂载原盘、加入 Applications 符号链接、重新压盘。
 val copyDmgToDownloads by tasks.registering {
     val dmgDir = layout.buildDirectory.dir("compose/binaries/main/dmg")
     val version = appVersion
@@ -339,6 +341,16 @@ val copyDmgToDownloads by tasks.registering {
         if (!System.getProperty("os.name", "").lowercase().contains("mac")) return@doLast
         val dmg = dmgDir.get().asFile.resolve("YunX-Desktop-$version.dmg")
         if (!dmg.isFile) return@doLast
+        val script = rootProject.file("scripts/rebuild-dmg-with-apps-link.sh")
+        if (script.isFile) {
+            val result = ProcessBuilder(script.absolutePath, dmg.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+            result.inputStream.bufferedReader().readLines().forEach { println("rebuild-dmg: $it") }
+            if (result.waitFor() != 0) {
+                println("rebuild-dmg: 重建失败（保留 jpackage 原始产物继续）")
+            }
+        }
         val downloads = File(System.getProperty("user.home"), "Downloads")
         if (!downloads.isDirectory) return@doLast
         dmg.copyTo(File(downloads, dmg.name), overwrite = true)
