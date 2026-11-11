@@ -17,25 +17,12 @@ TMP_DMG="${APP_DMG%.dmg}-styled.dmg"
 
 hdiutil detach "/Volumes/$VOLNAME" -force -quiet 2>/dev/null || true
 
-# 1. 建 stage：.app + Applications 符号链接
-cp -R "$APP_DMG" "$STAGE/.app-source" 2>/dev/null || true
-hdiutil attach "$APP_DMG" -nobrowse -readonly > /dev/null
-SRC_APP=$(ls -d /Volumes/*/YunX-Desktop.app 2>/dev/null | head -1)
-if [ -z "$SRC_APP" ]; then
-    # 原盘没有嵌套结构,直接挂载卷根找 .app
-    SRC_APP=$(ls -d /Volumes/YunX-Desktop/*.app 2>/dev/null | head -1)
-fi
-hdiutil detach "/Volumes/YunX-Desktop" -quiet 2>/dev/null || true
+# 1. 建 stage：从原 DMG 拷出 .app（挂载用固定挂载点,避免卷名歧义）
+MOUNT=/tmp/yunx-dmg-rebuild
+hdiutil attach "$APP_DMG" -nobrowse -readonly -mountpoint "$MOUNT" > /dev/null
+cp -R "$MOUNT/YunX-Desktop.app" "$STAGE/YunX-Desktop.app"
+hdiutil detach "$MOUNT" -quiet
 
-if [ -z "$SRC_APP" ]; then
-    echo "警告:找不到 YunX-Desktop.app,降级为默认布局"
-    hdiutil convert "$APP_DMG" -format UDZO -o "$TMP_DMG" > /dev/null
-    mv "$TMP_DMG" "$APP_DMG"
-    rm -rf "$STAGE"
-    exit 0
-fi
-
-cp -R "$SRC_APP" "$STAGE/YunX-Desktop.app"
 ln -s /Applications "$STAGE/Applications"
 
 # 2. create-dmg 生成标准样式（app 左 160,200 / Applications 右 420,200 / 窗口 640x420）

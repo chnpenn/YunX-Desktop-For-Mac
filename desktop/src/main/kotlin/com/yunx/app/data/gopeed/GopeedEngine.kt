@@ -248,6 +248,7 @@ object GopeedEngine {
                 .redirectError(ProcessBuilder.Redirect.appendTo(log))
             val p = pb.start()
             process = p
+            startedAtMs = System.currentTimeMillis()
             port = localPort
             registerShutdownHook()
             if (!awaitReady()) {
@@ -336,16 +337,31 @@ object GopeedEngine {
     /** 取一个本机空闲端口（先探测再释放；与引擎实际绑定之间存在极小竞态，失败会重启重试） */
     private fun pickFreePort(): Int = ServerSocket(0).use { it.localPort }
 
-    /** 轮询 `/api/v1/info` 直到引擎就绪 */
+    /**
+     * 轮询 `/api/v1/info` 直到引擎就绪。
+     * ★ mac 上未签名内核首次运行会触发 Gatekeeper 校验（实测 20-60s 甚至更久）：
+     *   只要进程还活着就继续等（上限 READY_TIMEOUT_MS），不要提前杀——
+     *   校验完成前杀掉再重启只会重新排队校验，死循环。
+     */
     private fun awaitReady(): Boolean {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        var gatekeeperWarned = false
         while (System.currentTimeMillis() < deadline) {
-            process?.let { if (!it.isAlive) return false }
+            process?.let {
+                if (!it.isAlive) return false
+                // 进程活着但 30s 还没就绪：大概率是 Gatekeeper 在校验，记一条日志提示耐心等
+                if (!gatekeeperWarned && System.currentTimeMillis() - startedAtMs > 30_000L) {
+                    gatekeeperWarned = true
+                    Log.i(TAG, "引擎进程存活但尚未就绪（可能处于 Gatekeeper 安全校验中），继续等待…")
+                }
+            }
             if (runCatching { infoJson() }.isSuccess) return true
             Thread.sleep(200L)
         }
         return false
     }
+
+    private var startedAtMs = 0L
 
     // ---------------------------------------------------------------------------------------------
     // HTTP API
