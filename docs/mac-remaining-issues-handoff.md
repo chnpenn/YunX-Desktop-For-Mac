@@ -81,9 +81,41 @@
 
 ---
 
+## 问题 2.5：UC 网盘文件「分享」报错（下载正常 / 文件夹分享正常）
+
+### 现象
+
+UC 网盘页面里：对**单个视频文件**（如「示例视频」）点分享 → 报错（错误文案通过 `cloudMessage` 只显示在 UI Snackbar，**不写日志文件**，日志里只有下载 enqueue 记录可佐证下载正常）；对**文件夹**分享 → 正常出链接。
+
+### 已核对的代码事实（给 GPT 的起点）
+
+- 分享入口：`UCCoudViewModel.kt`
+  - `shareFile()`（约 543 行，单文件）与 `shareSelected()`（约 646 行，批量）——两者实现**几乎相同**，都调 `api.createShare(...)` → `api.getShareInfo(shareId, cookie)`；
+  - 下载走的是另一条链路（`getDownloadLink` 内「创建分享→video_preview」自动化流程，与手动分享无关），所以「下载可以、分享报错」两者互不印证。
+- API 层：`UCApi.kt`
+  - `createShare()`（787 行）：POST `SHARE_CREATE_URL`（`/1/clouddrive/share?pr=UCBrowser&fr=pc`），body 含 `fid_list` / `title` / `url_type`(1=无提取码 2=带码) / `expired_type` / `passcode`；
+  - **UC 分享创建是异步任务**：响应只有 `data.task_id`，需轮询 `TASK_URL`（`/1/clouddrive/task`）直到 `finished_at>0 || status==2` 才拿得到 `share_id`；
+  - `pollShareTask()`（813 行）：**固定轮询 15 次 × 1s = 15s 上限**，超时返回 null → 上层抛 `IllegalStateException("创建分享失败")` → UI 显示「分享失败」（或服务端 message）。
+- 单文件 vs 文件夹的差别在请求侧只有：`fid_list` 内容与 `title`（单文件用文件名，文件夹用固定「分享 N 个文件」）。**参数模板本身无单文件特殊处理**。
+
+### 可能根因（按概率排序，均未实测确认——需要日志/抓包验证）
+
+1. **UC 服务端对单文件（尤其视频）分享走异步审核**：部分网盘对涉视频单文件分享有安全审核，task 长时间 `status!=2`，15s 轮询窗口内未完成 → 超时报「创建分享失败」。文件夹分享无审核或审核快 → 正常。**验证法**：把 `pollShareTask` 轮询上限加大（如 60s）并在轮询循环里 log 每次返回的 status/share_id，复现一次看 task 是否最终完成。
+2. **服务端同步报错但错误被吞**：`createShare` 的 `parseData` 在 status!=200 时会抛 `QuarkApiException(friendlyMessage(message))`，但 `shareFile` 的 catch 只取 `e.message` 写 `cloudMessage`——若 message 为空或被改写，用户看到的就是干巴巴「分享失败」。**验证法**：在 `shareFile`/`shareSelected` 的 catch 里把完整异常写入日志文件（现在分享失败**完全不写日志**，这是排查盲区）。
+3. **入口差异**：`shareFile`（长按单文件菜单）与 `shareSelected`（多选→批量分享）是两个入口、同一 API。可对比「直接点分享」与「多选一个再分享」是否都失败，缩小范围。
+
+### 修复建议（给 GPT）
+
+1. **先补日志**（最重要，当前分享失败零日志）：`shareFile` / `shareSelected` / `UCApi.createShare` / `pollShareTask` 四处加 log（请求 body、task 轮询每次的 status / share_id / finished_at、异常全量 message），复现一次即可定位是超时还是服务端拒绝；
+2. 若确认是审核慢：轮询上限 15s → 60s，轮询期间 UI 提示「分享创建中（可能需要审核）」；
+3. 若确认是服务端拒绝（如视频审核不过）：把服务端 message 原样透出到 UI（现在 `friendlyMessage` 可能改写了文案），并考虑引导用户改用文件夹分享；
+4. 对照：上游 Windows 版 `UCCoudViewModel.shareFile` 与本仓库同源同实现，可查上游 issue 区是否有同样反馈（如有则是服务端策略，非移植引入）。
+
+---
+
 ## 问题 3：应用意外闪退（崩溃报告 4 份，同一根因）
 
-### 崩溃签名（~/Library/Logs/DiagnosticReports/YunX-Desktop-2026-11-11-{163338,185815,190454,193355}.ips）
+### 崩溃签名（~/Library/Logs/DiagnosticReports/YunX-Desktop-2026-11-11-{163338,185815,190454,193355,200229,202103}.ips，共 6 份，栈完全一致）
 
 ```
 Exception Type:  EXC_BREAKPOINT (SIGTRAP)
@@ -109,7 +141,7 @@ Exception Type:  EXC_BREAKPOINT (SIGTRAP)
 
 ### 触发场景（用户日志时间线）
 - 粘贴磁力到输入框（输入法激活）→ 切换输入法/焦点 → 崩溃；
-- 三次崩溃（16:33 / 18:58 / 19:33）栈完全一致。
+- 20:02 / 20:21 两份新报告显示触发点是**输入法菜单构建**（栈中出现 `utTryToSetupInputMethodMenu` → `IMKInputSessionGetMenuIntoMenuWithCompletionHandler`）——即**点击输入法菜单/切换输入法时**，输入法系统也会向 AWTView 请求 selectedRange，同样崩。意味着不只是打字，任何激活输入法面板的操作都可能触发。
 
 ### 修复方案（推荐，已验证环境可行）
 
