@@ -16,6 +16,7 @@ import com.yunx.app.data.db.LinkHistoryDao
 import com.yunx.app.data.db.LinkHistoryEntity
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.download.DownloadPlatform
+import com.yunx.app.data.download.P2PLink
 import com.yunx.app.data.download.DownloadSource
 import com.yunx.app.data.network.BaiduConstants
 import com.yunx.app.data.network.C139Constants
@@ -897,6 +898,13 @@ class ResolveViewModel(
             startGitHubResolve(github)
             return
         }
+        // ★ P2P 链接（磁力 / ed2k）与裸 HTTP 直链自动识别：不走网盘解析，
+        //   直接构造 DownloadLink 弹下载确认框（磁力 / ed2k 由引擎执行，直链走内置下载器）。
+        //   放在口令解析之前：magnet:/ed2k: 不是口令，先问口令服务只会白吃一次 502。
+        if (P2PLink.matches(link)) {
+            startP2PDirectDownload(link)
+            return
+        }
         viewModelScope.launch {
             uiState = ResolveUiState.Loading
             // 中文口令兜底（既不是分享链接、也不是 GitHub 链接）：**先迅雷，迅雷没给出可用链接再问星海**。
@@ -1087,6 +1095,26 @@ class ResolveViewModel(
      * GitHub 链接解析入口：仓库 → 代码/Releases 根；账号 → 仓库列表；直链 → 直接弹下载确认。
      * 复用 ShareDetailScreen 框架（搜索/多选/批量/确认弹窗/收藏/面包屑），canSave=false（无转存）。
      */
+    /**
+     * P2P 直达下载：磁力 / ed2k 链接不走网盘解析，直接弹下载确认框交给引擎。
+     * 文件名优先取链接自带（磁力 dn= / ed2k 文件段），解析元数据后由引擎侧修正。
+     */
+    private fun startP2PDirectDownload(link: String) {
+        currentPlatform = SharePlatform.GITHUB  // 复用 GitHub 直链分支的免登录下载路径
+        isGuest = false
+        currentPwd = null
+        session = ShareSession(shareId = "p2p:direct", stoken = "", title = P2PLink.displayName(link))
+        currentLink = link
+        downloadManager.currentShareUrl = link
+        downloadLink = DownloadLink(
+            fid = "p2p:direct",
+            filename = P2PLink.displayName(link),
+            downloadUrl = link,
+            size = -1
+        )
+        uiState = ResolveUiState.Idle
+    }
+
     fun startGitHubResolve(linkType: GitHubLinkType) {
         currentPlatform = SharePlatform.GITHUB
         // GitHub 不需要登录，也不属于「游客模式」提示的适用范围
@@ -2032,6 +2060,28 @@ class ResolveViewModel(
             downloadLink = null
             pendingSaveDir = ""
             // GitHub 分支：无需网盘凭证，直链先经镜像前缀转换，带 size 和 platform=github 入队
+            // ★ P2P 直达下载：磁力记 MAGNET，ed2k 记 ED2K（引擎按协议分流），不带网盘凭证
+            if (link.downloadUrl.startsWith("magnet:", true) ||
+                link.downloadUrl.startsWith("ed2k:", true)
+            ) {
+                val platform = if (link.downloadUrl.startsWith("ed2k:", true)) {
+                    DownloadPlatform.ED2K
+                } else {
+                    DownloadPlatform.MAGNET
+                }
+                try {
+                    downloadManager.enqueue(
+                        url = link.downloadUrl,
+                        fileName = link.filename,
+                        platform = platform,
+                        saveDir = saveDir
+                    )
+                    downloadStarted = true
+                } catch (e: Exception) {
+                    uiState = ResolveUiState.Error("下载失败：${e.message ?: "未知错误"}")
+                }
+                return@launch
+            }
             if (currentPlatform == SharePlatform.GITHUB) {
                 try {
                     val prefix = mirrorPrefixProvider()
