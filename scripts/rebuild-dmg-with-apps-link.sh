@@ -16,7 +16,7 @@ MOUNT=/tmp/yunx-dmg-rebuild
 STAGE=$(mktemp -d)
 VOLNAME="YunX-Desktop"
 
-hdiutil detach "$MOUNT" -quiet 2>/dev/null || true
+hdiutil detach "/Volumes/$VOLNAME" -quiet 2>/dev/null || true
 rm -rf "$MOUNT"
 
 # 1. 挂载 jpackage 原始产物，拷出 .app
@@ -30,7 +30,7 @@ ln -s /Applications "$STAGE/Applications"
 # 3. AppleScript 设置 Finder 视图：图标大小、网格对齐、两个图标并排靠上居中
 #    （create volume 的临时盘先挂上，用 Finder 设置视图参数后再压盘）
 hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" -ov -format UDRW -size 512m "${APP_DMG%.dmg}-tmp.dmg" > /dev/null
-hdiutil attach "${APP_DMG%.dmg}-tmp.dmg" -nobrowse -mountpoint "$MOUNT" > /dev/null
+hdiutil attach "${APP_DMG%.dmg}-tmp.dmg" -nobrowse > /dev/null   # 按卷名挂到 /Volumes/YunX-Desktop,AppleScript 才能命中
 
 osascript <<APPLESCRIPT > /dev/null 2>&1
 tell application "Finder"
@@ -49,7 +49,7 @@ APPLESCRIPT
 
 sync
 sleep 2
-hdiutil detach "$MOUNT" -force -quiet 2>/dev/null || hdiutil detach "$MOUNT" -quiet
+hdiutil detach "/Volumes/$VOLNAME" -force -quiet 2>/dev/null || hdiutil detach "/Volumes/$VOLNAME" -quiet
 
 # 4. 转成只读压缩盘（发布用）
 rm -f "$APP_DMG"
@@ -64,4 +64,4 @@ if [ -e "$MOUNT/Applications" ] && [ -d "$MOUNT/YunX-Desktop.app" ]; then
 else
     echo "警告：DMG 重建后缺少预期内容" >&2
 fi
-hdiutil detach "$MOUNT" -quiet
+hdiutil detach "/Volumes/$VOLNAME" -quiet
