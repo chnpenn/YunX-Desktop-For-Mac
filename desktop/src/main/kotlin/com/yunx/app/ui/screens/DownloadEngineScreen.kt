@@ -245,7 +245,10 @@ fun DownloadEngineScreen(
         }
     }
 
-    /** 切换引擎（切到 Gopeed 前要求内核已导入） */
+    /**
+     * 切换引擎（★ 方案 A 语义：该选择只影响 HTTP 新任务；磁力 / ed2k / 种子任务
+     * 只要内核已导入就自动走 Gopeed，与这里的设置无关。切到 Gopeed 前要求内核已导入）。
+     */
     fun switchEngine(target: String) {
         if (target == SettingsRepository.ENGINE_GOPEED && !GopeedEngine.isInstalled()) {
             SnackbarController.show("请先导入 Gopeed 内核")
@@ -254,8 +257,8 @@ fun DownloadEngineScreen(
         settingsRepo.downloadEngine = target
         currentEngine = target
         SnackbarController.show(
-            if (target == SettingsRepository.ENGINE_GOPEED) "已切换到 Gopeed 引擎（仅影响新任务）"
-            else "已切换到内置下载器（仅影响新任务）"
+            if (target == SettingsRepository.ENGINE_GOPEED) "已选择 Gopeed 处理 HTTP 任务（P2P 任务始终自动走 Gopeed）"
+            else "HTTP 新任务将使用内置下载器（磁力 / ed2k / 种子仍自动走 Gopeed）"
         )
         // ★ 只在「切到 Gopeed 引擎」这一时刻把引擎进程拉起来：下载/导入内核、进入本页都不提前启动。
         // 引擎没起来时读不到核心版本号，属正常（不是失败）。
@@ -355,9 +358,12 @@ fun DownloadEngineScreen(
             EngineCard(
                 icon = { Icon(Icons.Outlined.Memory, contentDescription = null) },
                 title = "内置分片下载器",
-                description = "Range 并发分片、断点续传、自适应分片、慢连接抢占。支持镜像回退与全局限速。",
+                description = "处理 HTTP 直链任务：Range 并发分片、断点续传、自适应分片、慢连接抢占，支持镜像回退与全局限速。" +
+                    "磁力 / ed2k / BT 种子任务不受此选择影响，自动由 Gopeed 引擎处理（需已安装内核）。",
                 active = currentEngine == SettingsRepository.ENGINE_BUILTIN,
-                onSwitch = { switchEngine(SettingsRepository.ENGINE_BUILTIN) }
+                onSwitch = if (currentEngine != SettingsRepository.ENGINE_BUILTIN) {
+                    { switchEngine(SettingsRepository.ENGINE_BUILTIN) }
+                } else null
             )
 
             Spacer(Modifier.height(12.dp))
@@ -367,10 +373,12 @@ fun DownloadEngineScreen(
                 icon = { Icon(Icons.Outlined.Speed, contentDescription = null) },
                 title = "Gopeed 引擎",
                 badge = "实验性",
-                description = "以独立进程运行官方 Gopeed 内核，由它接管 HTTP 多连接下载。" +
+                description = "接管 HTTP 多连接下载与全部 P2P 任务（磁力 / ed2k / BT 种子——自动路由，无需手动切换）。" +
                     "引擎不支持下载限速、失败重试与镜像回退，GitHub 下载仍走内置引擎。",
                 active = currentEngine == SettingsRepository.ENGINE_GOPEED,
-                onSwitch = { switchEngine(SettingsRepository.ENGINE_GOPEED) }
+                onSwitch = if (currentEngine != SettingsRepository.ENGINE_GOPEED) {
+                    { switchEngine(SettingsRepository.ENGINE_GOPEED) }
+                } else null
             ) {
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -890,7 +898,7 @@ private fun EngineCard(
     title: String,
     description: String,
     active: Boolean,
-    onSwitch: () -> Unit,
+    onSwitch: (() -> Unit)? = null,
     badge: String? = null,
     content: (@Composable () -> Unit)? = null
 ) {
@@ -933,10 +941,12 @@ private fun EngineCard(
             )
             Spacer(Modifier.height(12.dp))
             if (active) {
-                Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                    Text("使用中")
+                // ★ 方案 A：P2P 任务自动路由后,当前引擎卡片显示语义化的禁用态说明,
+                //   不再显示可能误导的「切换到此引擎」按钮(另一引擎描述里已写清分工)
+                OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                    Text("使用中（HTTP 任务 · 磁力 / ed2k / 种子自动路由）")
                 }
-            } else {
+            } else if (onSwitch != null) {
                 OutlinedButton(onClick = onSwitch, modifier = Modifier.fillMaxWidth()) {
                     Text("切换到此引擎")
                 }
