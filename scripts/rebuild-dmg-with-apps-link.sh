@@ -14,7 +14,7 @@ fi
 
 MOUNT=/tmp/yunx-dmg-rebuild
 STAGE=$(mktemp -d)
-VOLNAME="YunX Desktop"
+VOLNAME="YunX-Desktop"
 
 hdiutil detach "$MOUNT" -quiet 2>/dev/null || true
 rm -rf "$MOUNT"
@@ -34,14 +34,14 @@ hdiutil attach "${APP_DMG%.dmg}-tmp.dmg" -nobrowse -mountpoint "$MOUNT" > /dev/n
 
 osascript <<APPLESCRIPT > /dev/null 2>&1
 tell application "Finder"
-    tell disk "$VOLNAME"
+    tell disk "YunX-Desktop"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set bounds of container window to {200, 120, 760, 520}
-        set position of item "YunX-Desktop.app" of container window to {130, 100}
-        set position of item "Applications" of container window to {400, 100}
+        set bounds of container window to {240, 120, 820, 500}
+        set position of item "YunX-Desktop.app" of container window to {160, 90}
+        set position of item "Applications" of container window to {380, 90}
         close
     end tell
 end tell
