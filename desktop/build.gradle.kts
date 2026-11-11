@@ -301,7 +301,8 @@ compose.desktop {
                 perUserInstall = true
             }
             // ★ Mac 移植：jpackage 默认给 Kotlin logo 当图标，换成云析图标
-            //   （iconutil 由 resources/icon.png 生成的多尺寸 icns）
+            //   （iconutil 由 resources/icon.png 生成的 iconset 打包，含 16~1024 全尺寸层：
+            //     缺小尺寸层会导致 Dock/菜单栏图标显示过大）
             macOS {
                 iconFile.set(project.file("YunX-Desktop.icns"))
             }
