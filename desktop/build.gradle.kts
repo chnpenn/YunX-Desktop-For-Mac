@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.util.Properties
 
 plugins {
     kotlin("jvm")
@@ -87,6 +88,32 @@ dependencies {
 kotlin {
     jvmToolchain(17)
 }
+
+// macOS IME crash mitigation: compilation stays on 17, but Compose must use 21
+// for run/jlink/jpackage regardless of the Gradle daemon's JAVA_HOME (17/21/25).
+// Explicit paths support CI and nonstandard local installations; otherwise use
+// Gradle's installed-JDK discovery. Never silently package a daemon JDK instead.
+val onMac = System.getProperty("os.name", "").lowercase().contains("mac")
+val macRuntimeJavaHome = if (onMac) {
+    val overrideHome = providers.gradleProperty("runtimeJavaHome")
+        .orElse(providers.environmentVariable("YUNX_RUNTIME_JAVA_HOME")).orNull
+    val home = if (overrideHome != null) file(overrideHome) else {
+        javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(21))
+        }.get().metadata.installationPath.asFile
+    }
+    val release = home.resolve("release")
+    check(release.isFile) { "Runtime JDK has no release file: $home" }
+    val metadata = Properties().apply { release.inputStream().use { load(it) } }
+    val version = metadata.getProperty("JAVA_VERSION", "").trim('"')
+    check(version.substringBefore('.') == "21") {
+        "macOS runtime must be JDK 21, found '$version' at $home; set -PruntimeJavaHome=<JDK 21 home>"
+    }
+    listOf("java", "jlink", "jpackage").forEach { tool ->
+        check(home.resolve("bin/$tool").canExecute()) { "Runtime JDK missing executable $tool: $home" }
+    }
+    home.absolutePath
+} else null
 
 // ---- 版本号单一来源：仓库根目录 version.txt（jpackage / 便携包 / 安装包 / 应用内版本全部由它派生）----
 // 格式：第一行版本号（如 1.3.1）；第二行 Beta=1 / Beta=0（1=预览版，0 或缺省=正式版）
@@ -264,6 +291,7 @@ tasks.register<Sync>("exportJcefNatives") {
 compose.desktop {
     application {
         mainClass = "com.yunx.app.MainKt"
+        macRuntimeJavaHome?.let { javaHome = it }
         // ★ Mac 移植：JCEF 的 mac 层（CefBrowserWindowMac 等）要访问 JDK 内部 API，
         //   缺这些参数会每帧抛 IllegalAccessError，内嵌浏览器无法渲染。
         //   sun.awt.AWTAccessor 在窗口创建路径用到；sun.lwawt（LWComponentPeer）在
@@ -329,34 +357,71 @@ compose.desktop {
     }
 }
 
-// ★ Mac 移植：packageDmg 完成后自动把 DMG 复制一份到「下载」目录，方便直接安装/分发。
-// 只在 macOS 上跑；用户目录无 Downloads 时静默跳过（不影响打包本身）。
-// 复制前先用脚本重建 DMG：jpackage 产物不含「Applications」快捷方式（用户打开 DMG
-// 后无处可拖、没法安装），脚本会挂载原盘、加入 Applications 符号链接、重新压盘。
-val copyDmgToDownloads by tasks.registering {
-    val dmgDir = layout.buildDirectory.dir("compose/binaries/main/dmg")
-    val version = appVersion
-    outputs.upToDateWhen { false }
-    doLast {
-        if (!System.getProperty("os.name", "").lowercase().contains("mac")) return@doLast
-        val dmg = dmgDir.get().asFile.resolve("YunX-Desktop-$version.dmg")
-        if (!dmg.isFile) return@doLast
-        val script = rootProject.file("scripts/rebuild-dmg-with-apps-link.sh")
-        if (script.isFile) {
-            val result = ProcessBuilder(script.absolutePath, dmg.absolutePath)
-                .redirectErrorStream(true)
-                .start()
-            result.inputStream.bufferedReader().readLines().forEach { println("rebuild-dmg: $it") }
-            if (result.waitFor() != 0) {
-                println("rebuild-dmg: 重建失败（保留 jpackage 原始产物继续）")
-            }
+// Verify the actual jlinked image, not just setup-java/JAVA_HOME. packageDmg
+// consumes this same app image; fail before producing/distributing a wrong JRE.
+val verifyPackagedRuntime by tasks.registering {
+    group = "verification"
+    description = "Verify macOS app image embeds Java 21 (compiler/toolchain remains 17)"
+    if (onMac) {
+        dependsOn("createDistributable")
+        doLast {
+            val release = layout.buildDirectory.file(
+                "compose/binaries/main/app/YunX-Desktop.app/Contents/runtime/Contents/Home/release"
+            ).get().asFile
+            check(release.isFile) { "Packaged runtime release file missing: $release" }
+            val metadata = Properties().apply { release.inputStream().use { load(it) } }
+            val version = metadata.getProperty("JAVA_VERSION", "").trim('"')
+            check(version.substringBefore('.') == "21") { "Packaged runtime must be Java 21, found '$version'" }
+            logger.lifecycle("Verified packaged runtime: Java $version ($release); Kotlin toolchain: Java 17")
         }
-        val downloads = File(System.getProperty("user.home"), "Downloads")
-        if (!downloads.isDirectory) return@doLast
-        dmg.copyTo(File(downloads, dmg.name), overwrite = true)
-        println("DMG 已复制到: ${File(downloads, dmg.name).absolutePath}")
+    } else {
+        onlyIf { false }
     }
 }
-tasks.matching { it.name == "packageDmg" || it.name == "packageDistributionForCurrentOS" }.configureEach {
+
+// Style the producer's output before any consumer copies it. A failed rebuild
+// fails packageDmg; finalizers must never distribute its unstyled/stale output.
+val dmgFile = layout.buildDirectory.file("compose/binaries/main/dmg/YunX-Desktop-$appVersion.dmg")
+val rebuildDmgScript = rootProject.file("scripts/rebuild-dmg-with-apps-link.sh")
+val dmgBackground = rootProject.file("scripts/dmg-background.png")
+val copyDmgToDownloads by tasks.registering {
+    dependsOn("packageDmg")
+    onlyIf {
+        System.getProperty("os.name", "").lowercase().contains("mac") &&
+            tasks.getByName("packageDmg").state.let {
+                it.failure == null && (it.didWork || it.upToDate)
+            }
+    }
+    doLast {
+        val dmg = dmgFile.get().asFile
+        check(dmg.isFile) { "Expected packaged DMG: $dmg" }
+        val downloads = File(System.getProperty("user.home"), "Downloads")
+        if (!downloads.isDirectory) {
+            println("Downloads directory missing; verified DMG remains at: $dmg")
+            return@doLast
+        }
+        val destination = File(downloads, dmg.name)
+        dmg.copyTo(destination, overwrite = true)
+        println("DMG 已复制到: ${destination.absolutePath}")
+    }
+}
+tasks.matching { it.name == "packageDmg" }.configureEach {
+    if (onMac) dependsOn(verifyPackagedRuntime)
+    inputs.file(rebuildDmgScript)
+    inputs.file(dmgBackground)
+    doLast {
+        val dmg = dmgFile.get().asFile
+        check(dmg.isFile) { "Expected packaged DMG: $dmg" }
+        val process = ProcessBuilder("/bin/bash", rebuildDmgScript.absolutePath, dmg.absolutePath)
+            .inheritIO()
+            .start()
+        check(process.waitFor() == 0) { "DMG styling failed; no DMG was copied to Downloads" }
+    }
     finalizedBy(copyDmgToDownloads)
+}
+// Standard packaging entry points deliver only after packageDmg's styling action.
+tasks.matching { it.name == "packageDistributionForCurrentOS" }.configureEach {
+    if (System.getProperty("os.name", "").lowercase().contains("mac")) {
+        dependsOn(copyDmgToDownloads)
+    }
 }

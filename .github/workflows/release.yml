@@ -20,7 +20,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      # Install the compiler toolchain explicitly; Gradle does not have a JDK
+      # download resolver configured. setup-java 21 below becomes JAVA_HOME.
+      - name: Set up compiler JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up runtime JDK 21
+        id: runtime-java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -30,8 +39,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build DMG
+        env:
+          YUNX_RUNTIME_JAVA_HOME: ${{ steps.runtime-java.outputs.path }}
         run: ./gradlew :desktop:packageDmg --no-daemon
-        # packageDmg 内含 copyDmgToDownloads → rebuild-dmg-with-apps-link.sh
+        # packageDmg 验证 app 内嵌 Java 21，再美化 DMG、复制到 Downloads。
         # （补 Applications 快捷方式），产物在 desktop/build/compose/binaries/main/dmg/
 
       - name: Resolve version and DMG path

@@ -782,66 +782,104 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
             parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
         }
 
-    /** 创建分享（抓包：POST /1/clouddrive/share，url_type 1=无提取码 2=带提取码，expired_type 1永久/2一天/3七天/4三十天）。
- * 注意：分享创建是**异步任务**——响应只有 data.task_id，必须轮询 /1/clouddrive/task 直到完成拿到 share_id。 */
+    /** 创建分享后必须等待 task.status=2，再查询 share/password；不能把 finished_at 当作成功。 */
     suspend fun createShare(
         fidList: List<String>,
         title: String,
         urlType: Int,
         passcode: String,
         expiredType: Int,
-        cookie: String
+        cookie: String,
+        diagnosticId: String = UCShareDiagnostics.newId()
     ): String? = withContext(Dispatchers.IO) {
-        val body = JSONObject()
-            .put("fid_list", JSONArray().apply { fidList.forEach { put(it) } })
-            .put("title", title.ifBlank { "分享文件" })
-            .put("url_type", urlType)
-            .put("expired_type", expiredType)
-            .put("public_search", if (passcode.isNotBlank()) 0 else 1)
-            .apply { if (passcode.isNotBlank()) put("passcode", passcode) }
-            .toString()
-        val request = postJson(UCConstants.SHARE_CREATE_URL, cookie, body)
-        // 1) 创建分享 → task_id（异步，须轮询等待完成）
-        val taskId = parseData(request) { data ->
-            data.optString("task_id").takeIf { it.isNotBlank() }
-        } ?: return@withContext null
-        // 2) 轮询 task 直到完成，取 share_id（官方响应 status=2 + share_id）
-        pollShareTask(taskId, cookie)
+        UCShareDiagnostics.event(diagnosticId, "create_start", "count" to fidList.size,
+            "url_type" to urlType, "expired_type" to expiredType, "has_passcode" to passcode.isNotBlank())
+        try {
+            val body = JSONObject()
+                .put("fid_list", JSONArray().apply { fidList.forEach { put(it) } })
+                .put("title", title.ifBlank { "分享文件" })
+                .put("url_type", urlType)
+                .put("expired_type", expiredType)
+                .put("public_search", if (passcode.isNotBlank()) 0 else 1)
+                .apply { if (passcode.isNotBlank()) put("passcode", passcode) }
+                .toString()
+            val data = shareData(postJson(UCConstants.SHARE_CREATE_URL, cookie, body), diagnosticId, "create")
+            val taskId = data.optString("task_id").takeIf { it.isNotBlank() && it != "null" }
+                ?: throw QuarkApiException("创建分享失败：响应缺少 task_id")
+            UCShareDiagnostics.event(diagnosticId, "task_created")
+            pollShareTask(taskId, cookie, diagnosticId)
+        } catch (e: Exception) {
+            UCShareDiagnostics.failure(diagnosticId, "create_failed", e)
+            throw e
+        }
     }
 
-    /** 轮询分享创建任务（GET /1/clouddrive/task），返回 share_id；超时返回 null */
-    private suspend fun pollShareTask(taskId: String, cookie: String): String? =
+    /** 保留 15 次轮询预算；业务/HTTP/解析失败立即返回具体错误，不伪装成审核超时。 */
+    private suspend fun pollShareTask(taskId: String, cookie: String, diagnosticId: String): String =
         withContext(Dispatchers.IO) {
-            val url = "${UCConstants.TASK_URL}&task_id=${URLEncoder.encode(taskId, "UTF-8")}&retry_index=0"
+            val started = System.nanoTime()
             for (i in 0 until 15) {
-                val shareId = runCatching {
-                    client.newCall(get(url, cookie)).execute().use { resp ->
-                        val json = JSONObject(resp.body?.string() ?: "{}")
-                        if (json.optInt("status") != 200) return@use null
-                        val data = json.optJSONObject("data") ?: return@use null
-                        val finished = data.optLong("finished_at") > 0 || data.optInt("status") == 2
-                        if (!finished) return@use null
-                        data.optString("share_id").takeIf { it.isNotBlank() }
-                    }
-                }.getOrNull()
-                if (shareId != null) return@withContext shareId
-                delay(1000)
+                // retry_index 是重试序号，不能每次都发 0（对齐 UC 任务协议）。
+                val url = "${UCConstants.TASK_URL}&task_id=${URLEncoder.encode(taskId, "UTF-8")}&retry_index=$i"
+                val data = shareData(get(url, cookie), diagnosticId, "poll", i)
+                val status = data.optInt("status", -1)
+                val finishedAt = data.optLong("finished_at")
+                val shareId = data.optString("share_id").takeIf { it.isNotBlank() && it != "null" }
+                UCShareDiagnostics.event(diagnosticId, "task_state", "attempt" to i,
+                    "task_status" to status, "finished_at" to finishedAt, "has_share_id" to (shareId != null),
+                    "elapsed_ms" to (System.nanoTime() - started) / 1_000_000)
+                if (status == 2) {
+                    return@withContext shareId ?: throw QuarkApiException("分享任务完成但缺少 share_id")
+                }
+                if (status == 3) {
+                    throw QuarkApiException(friendlyMessage(data.optString("message"), "分享任务失败（状态 $status）"), data.optInt("code"))
+                }
+                if (i < 14) delay(1000)
             }
-            null
+            UCShareDiagnostics.event(diagnosticId, "task_timeout", "attempts" to 15)
+            throw QuarkApiException("分享创建尚未完成，请稍后在 UC 网盘查看分享记录")
         }
 
-    /** 查询分享信息（抓包：POST share/password body={share_id} → 链接/提取码/标题） */
-    suspend fun getShareInfo(shareId: String, cookie: String): ShareInfo? = withContext(Dispatchers.IO) {
-        val body = JSONObject().put("share_id", shareId).toString()
-        val request = postJson(UCConstants.SHARE_INFO_URL, cookie, body)
-        parseData(request) { data ->
+    /** 分享链路单独记录白名单字段，不记录 Cookie、请求体、分享链接或提取码。 */
+    private fun shareData(request: Request, diagnosticId: String, stage: String, attempt: Int? = null): JSONObject {
+        client.newCall(request).execute().use { response ->
+            mergeCookieFromResponse(request, response)
+            val body = response.body?.string().orEmpty()
+            val json = runCatching { JSONObject(body) }.getOrNull()
+            UCShareDiagnostics.event(diagnosticId, "response", "stage" to stage, "attempt" to attempt,
+                "http" to response.code, "api_status" to json?.optInt("status"),
+                "code" to json?.optInt("code"), "message" to json?.optString("message"))
+            if (!response.isSuccessful) throw QuarkApiException("分享请求失败（HTTP ${response.code}）")
+            if (json == null) throw QuarkApiException("分享响应解析失败（HTTP ${response.code}）")
+            if (json.optInt("status") != 200 || json.optInt("code") != 0) {
+                throw QuarkApiException(friendlyMessage(json.optString("message"), "分享请求失败"), json.optInt("code"))
+            }
+            return json.optJSONObject("data") ?: throw QuarkApiException("分享响应缺少 data")
+        }
+    }
+
+    /** 查询分享信息（POST share/password body={share_id}）。 */
+    suspend fun getShareInfo(
+        shareId: String,
+        cookie: String,
+        diagnosticId: String = UCShareDiagnostics.newId()
+    ): ShareInfo? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().put("share_id", shareId).toString()
+            val data = shareData(postJson(UCConstants.SHARE_INFO_URL, cookie, body), diagnosticId, "info")
+            val shareUrl = data.optString("share_url").takeIf { it.isNotBlank() && it != "null" }
+                ?: throw QuarkApiException("获取分享链接失败：响应缺少 share_url")
+            UCShareDiagnostics.event(diagnosticId, "info_success")
             ShareInfo(
-                shareUrl = data.optString("share_url"),
+                shareUrl = shareUrl,
                 passcode = data.optString("passcode"),
                 pwdId = data.optString("pwd_id"),
                 title = data.optString("title"),
                 expiredType = data.optInt("expired_type")
             )
+        } catch (e: Exception) {
+            UCShareDiagnostics.failure(diagnosticId, "info_failed", e)
+            throw e
         }
     }
     // ---------- 请求构造与响应解析 ----------

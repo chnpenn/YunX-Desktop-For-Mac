@@ -11,6 +11,8 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import kotlin.reflect.KClass
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.download.DownloadPlatform
+import com.yunx.app.data.network.UCShareDiagnostics
+import kotlinx.coroutines.CancellationException
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.UCConstants
 import com.yunx.app.data.network.model.DownloadLink
@@ -242,28 +244,40 @@ class UCCoudViewModel(
      * ③ 拿到的直链走播放回调 checkplay 不换片，交给下载器。
      */
     private suspend fun ucVideoDownloadLinkViaShare(file: ShareFile, cookie: String): DownloadLink? {
-        // ① 创建 1 天有效、无提取码分享（UCApi.createShare 内部已异步轮询拿 share_id）
-        val shareId = api.createShare(
-            fidList = listOf(file.fid),
-            title = file.fname,
-            urlType = 1,       // 1=无提取码
-            passcode = "",
-            expiredType = ShareExpire.ONE_DAY,   // UC 的 expired_type 就等于中性码
-            cookie = cookie
-        ) ?: return null
-        // ② 查分享信息拿**对外分享码 pwd_id**（share_id 是内部 ID，直接当 pwd_id 调 token 会 41006 分享不存在）
-        val pwdId = api.getShareInfo(shareId, cookie)?.pwdId?.takeIf { it.isNotBlank() } ?: shareId
-        // ③ 分享解析流程：token → 文件列表 → video_preview 原画直链
-        val token = api.getShareToken(pwdId, null, cookie) ?: return null
-        val files = api.getTransferShareFiles(pwdId, token.stoken, "0", cookie) ?: return null
-        val target = files.firstOrNull { it.fid == file.fid } ?: files.firstOrNull() ?: return null
-        return api.getVideoPreview(
-            pwdId = pwdId,
-            stoken = token.stoken,
-            fid = target.fid,
-            fidToken = target.fidToken,
-            cookie = cookie
-        )?.copy(filename = file.fname)
+        val diagnosticId = UCShareDiagnostics.newId()
+        UCShareDiagnostics.event(diagnosticId, "share_start", "entry" to "video_download", "files" to 1, "folders" to 0)
+        // 自动化分享只是「优选原画」的辅助链路：失败必须回退 play 转码流，不能让
+        // createShare 抛出的异常穿透到下载入口（否则视频下载直接报错、失去回退）。
+        return try {
+            // ① 创建 1 天有效、无提取码分享（UCApi.createShare 失败会抛异常而非返回 null）
+            val shareId = api.createShare(
+                fidList = listOf(file.fid),
+                title = file.fname,
+                urlType = 1,       // 1=无提取码
+                passcode = "",
+                expiredType = ShareExpire.ONE_DAY,   // UC 的 expired_type 就等于中性码
+                cookie = cookie,
+                diagnosticId = diagnosticId
+            ) ?: return null
+            // ② 查分享信息拿**对外分享码 pwd_id**（share_id 是内部 ID，直接当 pwd_id 调 token 会 41006 分享不存在）
+            val pwdId = api.getShareInfo(shareId, cookie, diagnosticId)?.pwdId?.takeIf { it.isNotBlank() } ?: shareId
+            // ③ 分享解析流程：token → 文件列表 → video_preview 原画直链
+            val token = api.getShareToken(pwdId, null, cookie) ?: return null
+            val files = api.getTransferShareFiles(pwdId, token.stoken, "0", cookie) ?: return null
+            val target = files.firstOrNull { it.fid == file.fid } ?: files.firstOrNull() ?: return null
+            api.getVideoPreview(
+                pwdId = pwdId,
+                stoken = token.stoken,
+                fid = target.fid,
+                fidToken = target.fidToken,
+                cookie = cookie
+            )?.copy(filename = file.fname)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            UCShareDiagnostics.event(diagnosticId, "video_share_fallback", "exception" to e.javaClass.simpleName)
+            null
+        }
     }
 
     /**
@@ -543,11 +557,16 @@ class UCCoudViewModel(
     /** 创建分享并查询链接 */
     fun shareFile(urlType: Int, passcode: String, expiredType: Int) {
         val file = actionFile ?: return
+        val diagnosticId = UCShareDiagnostics.newId()
+        UCShareDiagnostics.event(diagnosticId, "share_start", "entry" to "single",
+            "files" to listOf(file).count { !it.isdir }, "folders" to listOf(file).count { it.isdir },
+            "url_type" to urlType, "expired_type" to expiredType, "has_passcode" to passcode.isNotBlank())
         viewModelScope.launch {
             isOperating = true
             try {
                 val cookie = cookieProvider()
                 if (cookie.isNullOrBlank()) {
+                    UCShareDiagnostics.event(diagnosticId, "share_no_account")
                     cloudMessage = "请先登录 UC 网盘"
                     return@launch
                 }
@@ -557,13 +576,17 @@ class UCCoudViewModel(
                     urlType = urlType,
                     passcode = passcode,
                     expiredType = expiredType,
-                    cookie = cookie
+                    cookie = cookie,
+                    diagnosticId = diagnosticId
                 ) ?: throw IllegalStateException("创建分享失败")
-                val info = api.getShareInfo(shareId, cookie)
+                val info = api.getShareInfo(shareId, cookie, diagnosticId)
                     ?: throw IllegalStateException("获取分享链接失败")
+                UCShareDiagnostics.event(diagnosticId, "share_success")
                 shareResult = info
                 // 保留 actionFile：FileActionSheet 存活才能弹出 ShareResultDialog
             } catch (e: Exception) {
+                UCShareDiagnostics.failure(diagnosticId, "share_failed", e)
+                if (e is CancellationException) throw e
                 cloudMessage = e.message ?: "分享失败"
             } finally {
                 isOperating = false
@@ -646,11 +669,16 @@ class UCCoudViewModel(
     fun shareSelected(urlType: Int, passcode: String, expiredType: Int) {
         val files = _selected.toList()
         if (files.isEmpty()) return
+        val diagnosticId = UCShareDiagnostics.newId()
+        UCShareDiagnostics.event(diagnosticId, "share_start", "entry" to "selection",
+            "files" to files.count { !it.isdir }, "folders" to files.count { it.isdir },
+            "url_type" to urlType, "expired_type" to expiredType, "has_passcode" to passcode.isNotBlank())
         viewModelScope.launch {
             isOperating = true
             try {
                 val cookie = cookieProvider()
                 if (cookie.isNullOrBlank()) {
+                    UCShareDiagnostics.event(diagnosticId, "share_no_account")
                     cloudMessage = "请先登录 UC 网盘"
                     return@launch
                 }
@@ -660,13 +688,17 @@ class UCCoudViewModel(
                     urlType = urlType,
                     passcode = passcode,
                     expiredType = expiredType,
-                    cookie = cookie
+                    cookie = cookie,
+                    diagnosticId = diagnosticId
                 ) ?: throw IllegalStateException("创建分享失败")
-                val info = api.getShareInfo(shareId, cookie)
+                val info = api.getShareInfo(shareId, cookie, diagnosticId)
                     ?: throw IllegalStateException("获取分享链接失败")
+                UCShareDiagnostics.event(diagnosticId, "share_success")
                 shareResult = info
                 exitMultiSelect()
             } catch (e: Exception) {
+                UCShareDiagnostics.failure(diagnosticId, "share_failed", e)
+                if (e is CancellationException) throw e
                 cloudMessage = e.message ?: "分享失败"
             } finally {
                 isOperating = false

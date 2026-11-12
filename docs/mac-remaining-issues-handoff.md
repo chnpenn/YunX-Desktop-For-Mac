@@ -5,7 +5,7 @@
 > 构建命令：`/Users/penn/.gradle/wrapper/dists/gradle-8.13-bin/5xuhj0ry160q40clulazy9h7d/gradle-8.13/bin/gradle :desktop:packageDmg`
 > DMG 自动产出到 `desktop/build/compose/binaries/main/dmg/` 并复制到 `~/Downloads/`
 > 运行日志：`~/.yunx-desktop/files/yunx-desktop.log`
-> 技术栈：Kotlin + Compose Multiplatform 1.7.3（Desktop/JVM）+ JCEF 132.3.1 + JNA 5.14，jpackage 打包（未签名），运行时 JDK 17（本地构建）/ CI macos-14
+> 技术栈：Kotlin + Compose Multiplatform 1.7.3（Desktop/JVM）+ JCEF 132.3.1 + JNA 5.14，jpackage 打包（未签名），编译工具链 Java 17 / macOS 打包运行时显式选择 JDK 21 / CI macos-14
 
 ---
 
@@ -14,40 +14,19 @@
 ### 现象
 打开 DMG 后是 Finder 默认视图：两个小图标挤在左上角，白底无布局。用户期望的是标准 mac 安装盘样式：灰底/带背景图、app 与 Applications 并排居中、128px 图标。
 
-### 已确认的事实链（重要——避免重复走弯路）
+### 已实施的样式与交付修复
 
-1. **jpackage 生成的 DMG 只含 `.app`，没有 `/Applications` 符号链接**——这已修复（`95d6cdf`），脚本会补链接。
-2. **样式脚本（AppleScript 设置窗口尺寸/图标位置）从未生效过**。根因已定位：
-   - 脚本用 `hdiutil attach ... -mountpoint /tmp/yunx-dmg-rebuild` 挂载 tmp 盘；
-   - `-mountpoint` 挂载时 Finder 看到的 disk 名是**挂载点名**（"yunx-dmg-rebuild"），不是卷名；
-   - AppleScript `tell disk "YunX-Desktop"` 永远抛 -1728（找不到 disk）→ 布局设置静默失败（输出重定向到 /dev/null 无人看见）。
-3. **修复已提交**（`33d5fd7`）：tmp 盘去掉 `-mountpoint`（自动挂载到 `/Volumes/YunX-Desktop`，AppleScript 能命中）；`hdiutil create -o` 注意会**自动追加 `.dmg` 后缀**（`X.dmg.tmp` 实际生成 `X.dmg.tmp.dmg`，文件名要对齐）。
-4. **实测确认**：修复后 `.DS_Store` 已写入 DMG（位置 160,90 持久化）。
-5. **但用户仍认为丑**。用户认可的样式特征（截图图一）：
-   - 灰底圆角矩形背景（或背景图）
-   - **大图标（约 128px）**：app 在左，Applications 在右
-   - **白色箭头**指向 Applications
-   - 两图标并排居中、窗口有留白
+1. jpackage 初始 DMG 只含 `.app`；之前的重建脚本还重复创建 `Applications`，触发 `create-dmg --app-drop-link` 失败，而静默降级把原始布局继续交付。
+2. 当前脚本只由 `create-dmg` 创建一次 Applications 链接，设置灰色背景、白色箭头、128px 图标与固定位置；无降级，失败即返回非零并保留原 DMG。
+3. Gradle 在 `packageDmg` 输出生成后先重建并验证同一个 DMG，再复制到 Downloads；打包/样式失败不会分发旧的或未样式化产物。
+4. 实测重建 DMG 并重新挂载：`.DS_Store` 含持久化图标位置 `(160,200)` / `(480,200)`、`iconSize=128`，Applications 链接、背景文件均正确；`hdiutil verify` checksum 有效。
+5. 故障注入确认 create-dmg 失败时原 DMG checksum 不变；隔离 Gradle fixture 确认样式任务失败时下载目录内已有 DMG 不被覆盖。`packageDmg` 与 `packageDistributionForCurrentOS` dry-run 图均通过。
 
-### 当前实现（HEAD `scripts/rebuild-dmg-with-apps-link.sh`）
+### 当前验证边界
 
-- 使用 `create-dmg`（brew 已装 1.3.0）：`--icon "YunX-Desktop.app" 160 200 --app-drop-link 420 200 --window-size 640 420 --volname YunX-Desktop`
-- 失败时降级为默认布局 DMG（仍含 Applications 链接）
-- **实测 create-dmg 产物本身样式正确**（曾截图验证：灰底、大图标、箭头都出现了）
+- 最终工作区执行 `:desktop:packageDmg` 时，Gradle 成功生成 jpackage 原始 DMG 并验证内嵌 Java 21.0.8，但样式脚本在 `hdiutil attach` 收到系统“权限被拒绝”后退出；Gradle 正确阻止复制到 Downloads。
+- Orca worker 在同一机器上对隔离 DMG 完成了真实重建、重新挂载与 checksum 校验；当前执行环境未能对最终 jpackage DMG 做完整样式化或 Finder 视觉验收。需在允许 hdiutil 挂载并允许 Finder 自动化的 macOS 会话重跑 `:desktop:packageDmg`。
 
-### 疑点：为什么最终用户拿到的 DMG 还是裸的
-
-排查方向（按可能性排序）：
-1. **`packageDmg` 与 rebuild 脚本的时序**：gradle 任务 `copyDmgToDownloads` 在 `packageDmg` 之后跑 rebuild 脚本，确认没有旧产物被意外复制覆盖（检查 `copyDmgToDownloads` 复制的源路径与 rebuild 输出路径是否一致）。
-2. **create-dmg 在 CI/后台执行时 AppleScript/Finder 交互失败**：create-dmg 内部用 AppleScript 设置图标位置，**无头/后台环境可能弹不出 Finder 交互**，失败时它可能静默产出未布局的 DMG（create-dmg 对失败的处理是 `|| true` 降级——降级产物就是裸的）。本地手动跑是好的（截图验证过），但 gradle 子进程环境可能差异。
-3. **`set -e` 与降级逻辑的交互**：脚本顶部 `set -e`，create-dmg 失败会中断脚本而不是走降级分支（检查 `|| true` 是否覆盖所有失败路径）。
-
-### 建议（给 GPT）
-- 优先方案：**放弃运行时 AppleScript**，改用**背景图方案**——生成一张 660×400 的背景 PNG（灰底/渐变+左侧画 app 图标示意+箭头+右侧 Applications 图标示意），DMG 挂载后把 `.background` 目录写入卷根 + AppleScript 仅设置背景图与图标位置（AppleScript 失败时至少背景图还在，.DS_Store 位置也预置）。
-- 或者：**预生成 .DS_Store**——先手动排好一次 DMG，把生成的 `.DS_Store` 存为仓库资源，每次打包时直接写入卷根（图标位置/窗口尺寸全部固化，不依赖运行时 AppleScript）。这个方案**100% 可靠**，唯一限制是窗口尺寸固定。
-- 校验：重建后挂载检查 `/Volumes/YunX-Desktop/.DS_Store` 是否存在且包含 `Bud1` 魔数。
-
----
 
 ## 问题 2：磁力链接下载失败/报错 502
 
@@ -85,31 +64,22 @@
 
 ### 现象
 
-UC 网盘页面里：对**单个视频文件**（如「示例视频」）点分享 → 报错（错误文案通过 `cloudMessage` 只显示在 UI Snackbar，**不写日志文件**，日志里只有下载 enqueue 记录可佐证下载正常）；对**文件夹**分享 → 正常出链接。
+UC 网盘单个视频文件分享曾报错，文件夹分享正常。此前分享失败无持久日志，无法确认现场根因。
 
-### 已核对的代码事实（给 GPT 的起点）
+### 已实施的协议修正与诊断（2026-11-11）
 
-- 分享入口：`UCCoudViewModel.kt`
-  - `shareFile()`（约 543 行，单文件）与 `shareSelected()`（约 646 行，批量）——两者实现**几乎相同**，都调 `api.createShare(...)` → `api.getShareInfo(shareId, cookie)`；
-  - 下载走的是另一条链路（`getDownloadLink` 内「创建分享→video_preview」自动化流程，与手动分享无关），所以「下载可以、分享报错」两者互不印证。
-- API 层：`UCApi.kt`
-  - `createShare()`（787 行）：POST `SHARE_CREATE_URL`（`/1/clouddrive/share?pr=UCBrowser&fr=pc`），body 含 `fid_list` / `title` / `url_type`(1=无提取码 2=带码) / `expired_type` / `passcode`；
-  - **UC 分享创建是异步任务**：响应只有 `data.task_id`，需轮询 `TASK_URL`（`/1/clouddrive/task`）直到 `finished_at>0 || status==2` 才拿得到 `share_id`；
-  - `pollShareTask()`（813 行）：**固定轮询 15 次 × 1s = 15s 上限**，超时返回 null → 上层抛 `IllegalStateException("创建分享失败")` → UI 显示「分享失败」（或服务端 message）。
-- 单文件 vs 文件夹的差别在请求侧只有：`fid_list` 内容与 `title`（单文件用文件名，文件夹用固定「分享 N 个文件」）。**参数模板本身无单文件特殊处理**。
+- `UCApi.createShare` 的异步任务轮询原来每次都固定发 `retry_index=0`；现在依次递增，仍为最多 15 次、每次间隔 1 秒。
+- 原逻辑将 `finished_at>0 || status==2` 均视为成功，且吞掉轮询错误；现在只有 `status==2` 返回分享 ID，失败状态立即报告。HTTP、业务码、JSON、缺少 task/share ID、详情 URL 缺失都会保留明确阶段和错误。
+- 单项、批量及视频下载内部分享入口均有持久化关联日志；记录事件、轮次、任务状态、耗时及脱敏错误，不记录 Cookie、文件名/FID、服务端 ID、分享 URL 或提取码。筛选 `I/UCShare`，详见 [UC 诊断说明](uc-share-diagnostics.md)。
+- 第三方 UC 客户端实现 `ctwj/urldb` 的 `uc_pan.go` 与 retry_index 递增和 status 2 完成逻辑相符；这是协议交叉证据，不是 UC 官方规范，也不能证明它就是本次真实单视频失败的现场原因。
+- 未增加创建重试或延长 15 秒预算，避免延时掩盖服务端拒绝或重复创建分享。
 
-### 可能根因（按概率排序，均未实测确认——需要日志/抓包验证）
+### 验证与待验收
 
-1. **UC 服务端对单文件（尤其视频）分享走异步审核**：部分网盘对涉视频单文件分享有安全审核，task 长时间 `status!=2`，15s 轮询窗口内未完成 → 超时报「创建分享失败」。文件夹分享无审核或审核快 → 正常。**验证法**：把 `pollShareTask` 轮询上限加大（如 60s）并在轮询循环里 log 每次返回的 status/share_id，复现一次看 task 是否最终完成。
-2. **服务端同步报错但错误被吞**：`createShare` 的 `parseData` 在 status!=200 时会抛 `QuarkApiException(friendlyMessage(message))`，但 `shareFile` 的 catch 只取 `e.message` 写 `cloudMessage`——若 message 为空或被改写，用户看到的就是干巴巴「分享失败」。**验证法**：在 `shareFile`/`shareSelected` 的 catch 里把完整异常写入日志文件（现在分享失败**完全不写日志**，这是排查盲区）。
-3. **入口差异**：`shareFile`（长按单文件菜单）与 `shareSelected`（多选→批量分享）是两个入口、同一 API。可对比「直接点分享」与「多选一个再分享」是否都失败，缩小范围。
-
-### 修复建议（给 GPT）
-
-1. **先补日志**（最重要，当前分享失败零日志）：`shareFile` / `shareSelected` / `UCApi.createShare` / `pollShareTask` 四处加 log（请求 body、task 轮询每次的 status / share_id / finished_at、异常全量 message），复现一次即可定位是超时还是服务端拒绝；
-2. 若确认是审核慢：轮询上限 15s → 60s，轮询期间 UI 提示「分享创建中（可能需要审核）」；
-3. 若确认是服务端拒绝（如视频审核不过）：把服务端 message 原样透出到 UI（现在 `friendlyMessage` 可能改写了文案），并考虑引导用户改用文件夹分享；
-4. 对照：上游 Windows 版 `UCCoudViewModel.shareFile` 与本仓库同源同实现，可查上游 issue 区是否有同样反馈（如有则是服务端策略，非移植引入）。
+- `UCShareTest`：9 项测试通过；本地固定响应，不连接 UC；覆盖 retry_index、pending→成功、终态失败、HTTP/JSON/业务错误、请求字段及详情响应。
+- 隔离日志检查确认 UCShare 事件持久化，测试 Cookie 未泄露。`git diff --check` 通过。
+- 真实 UC 账号复测仍需执行：单项普通文件、单项视频、多选一项、文件夹、多文件及带提取码。以 operation 关联号及任务状态判断残余服务端问题。
+- 代码和协议参考不足以证明单文件报错的真实服务端根因；不要把“已修协议”表述成“真实场景已确认修复”。
 
 ---
 
@@ -132,25 +102,42 @@ Exception Type:  EXC_BREAKPOINT (SIGTRAP)
 
 ### 根因
 
-**JDK 17 AWT 与 macOS 15.x 输入法（中文输入法/SCIM）的已知兼容性 bug**：
+**当前定位为 AWT 与 macOS 输入法交互的 native 崩溃，采用 JDK 21 运行时升级缓解，仍需新包复测**：
 - Compose Desktop 的 ComposeWindow 内嵌 AWTView 作为文本输入目标；
 - 中文输入法（SCIM/搜狗等）通过 TSM/XPC 请求 `selectedRange`；
-- JDK 17 的 AWTView 实现在某些状态下（无编辑上下文/焦点切换瞬间）抛 `NSException`；
+- 崩溃报告显示 AWTView 在输入法查询状态时抛出 `NSException`；具体前置状态尚未通过独立最小复现确认；
 - NSApplication 未捕获 → `-[NSApplication _crashOnException:]` → **主线程 EXC_BREAKPOINT 崩溃**；
-- 对应 OpenJDK bug 族：JDK-8281544 / JDK-8271456 等（macOS IME 兼容），**JDK 21.0.5+ / 17.0.13+ 包含修复**。
+- 原文列出的 OpenJDK bug 编号及“某补丁版本已修复”的对应关系未核实，不据此保证升级后消失；以新包实际 runtime 和输入法复测为准。
 
 ### 触发场景（用户日志时间线）
 - 粘贴磁力到输入框（输入法激活）→ 切换输入法/焦点 → 崩溃；
 - 20:02 / 20:21 两份新报告显示触发点是**输入法菜单构建**（栈中出现 `utTryToSetupInputMethodMenu` → `IMKInputSessionGetMenuIntoMenuWithCompletionHandler`）——即**点击输入法菜单/切换输入法时**，输入法系统也会向 AWTView 请求 selectedRange，同样崩。意味着不只是打字，任何激活输入法面板的操作都可能触发。
 
-### 修复方案（推荐，已验证环境可行）
+### 已实施的打包配置修复（未提交，2026-11-11）
 
-**将运行时 JDK 升级到 21.0.8**（本机 `/Library/Java/JavaVirtualMachines/jdk-21.jdk` 已存在，`java -version` 验证 21.0.8）：
+- `desktop/build.gradle.kts` 保留 `jvmToolchain(17)`；macOS 的 Compose `application.javaHome`
+  显式指向 JDK 21，覆盖 `-PruntimeJavaHome` 优先，其次 `YUNX_RUNTIME_JAVA_HOME`，最后使用 Gradle 已安装工具链发现。
+  校验 JDK 的 `release` 主版本和 `java/jlink/jpackage`，防止本地 Gradle 运行在 17/25 时把错误 JRE 带入发布包。
+- `.github/workflows/release.yml` 分别安装编译 JDK 17 与运行时 JDK 21，把后者的输出路径传给 Gradle；
+  Windows PR 便携包流程保持原有 Java 17，不属于本次 macOS 崩溃修复范围。
+- `:desktop:verifyPackagedRuntime` 创建 app image 后读取实际内嵌 `release`，要求 Java 21；
+  `:desktop:packageDmg` 自动先执行该校验，再生成 DMG。使用方法与选择优先级见 `docs/BUILD.md`。
+- 本机已安装 17.0.16 与 21.0.8。构建结果不能代替实际输入法验收：请用新包中文输入、粘贴文本、切换输入法菜单及焦点，
+  检查 `DiagnosticReports` 是否新增同栈报告；本次没有关闭用户应用、替换已安装应用或宣称 native 崩溃已彻底解决。
 
-1. **CI 侧**（`.github/workflows/release.yml`，已确认是 '21'）：`setup-java` 的 `java-version` 为 '21'——jpackage 用运行 gradle 的 JDK 做 jlink 运行时，DMG 里的运行时即 JDK 21；
-2. **本地侧**：构建命令前加 `JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home`（toolchain 编译目标仍 17，仅运行时变化）；
-3. **注意**：`jvmToolchain(17)` 保持不变（Compose 1.7.3 编译目标兼容）；jpackage 的 `--runtime-image` 用 JDK 21 的 jlink 输出，应用体积会略增；
-4. **验证**：装新包后用中文输入法在解析框输入/切换输入法/粘贴文本，观察是否再出同栈崩溃（检查 DiagnosticReports 新增文件）。
+### 本次验证证据（2026-11-11）
+
+- `JAVA_HOME=<本机 JDK17> ./gradlew :desktop:compileKotlin :desktop:verifyPackagedRuntime --offline --info`：成功（56s）；
+  Kotlin 日志 `jdkHome` 是 `jdk-17.jdk/Contents/Home`，jpackage 可执行文件来自 `jdk-21.jdk/Contents/Home/bin/jpackage`。
+- 使用同一 Java 17 Gradle 环境强制 `:desktop:createRuntimeImage --rerun-tasks --offline --info`：成功（7s），
+  日志确认执行 `jdk-21.jdk/Contents/Home/bin/jlink`，不是复用旧 runtime 的推断。
+- 随后重新执行 `verifyPackagedRuntime`：成功（15s），实际 `.app` 内 `JAVA_VERSION="21.0.8"`；
+  此次同时设置环境变量指向 JDK17、`-PruntimeJavaHome` 指向 JDK21，确认属性优先级有效。
+- `javap` 检查 `com.yunx.app.MainKt`：`major version: 61`（Java 17 字节码）。
+- 显式 `-PruntimeJavaHome=<JDK17>`：按预期失败，提示 `macOS runtime must be JDK 21, found '17.0.16'`。
+- `:desktop:packageDmg --dry-run`：校验任务在 `packageDmg` 之前；`git diff --check` 通过。
+- 此任务只实际重建并验证 app image；未实际重建 DMG、安装替换应用、运行 GitHub CI 或进行真实输入法 UI 验收。
+  构建日志临时保留于 `/tmp/yunx-jdk21-build.log`、`/tmp/yunx-jdk21-jlink.log`、`/tmp/yunx-jdk21-override.log`。
 
 ### 备选缓解（如果 JDK 21 升级有兼容问题）
 - Compose 1.7.3 官方建议升级 Compose 到 1.8.x（对 AWT 输入法处理有改进），但 markdown-renderer 必须停在 0.33.0 的限制需要一并评估；

@@ -2,7 +2,37 @@
 
 > 概览见 [README](../README.md)
 
-## 环境要求
+## macOS arm64：编译 Java 17，打包运行时 Java 21
+
+Mac 移植版需要同时安装 **JDK 17 和 JDK 21**（含 `java`、`jlink`、`jpackage`）。
+`kotlin.jvmToolchain(17)` 保持不变，Kotlin/Java 字节码目标为 17；Compose 的
+`application.javaHome` 单独选择 JDK 21，用于开发运行、jlink 与 jpackage。
+不要通过修改 `jvmToolchain` 来升级发布包运行时。
+
+选择顺序：`-PruntimeJavaHome=<JDK home>` → `YUNX_RUNTIME_JAVA_HOME` → Gradle 自动发现的已安装 JDK 21。
+覆盖值必须指向 JDK home（macOS 通常为 `*.jdk/Contents/Home`），版本不是 21、路径无效或缺少工具时直接失败，
+不会回退到运行 Gradle 的 JDK。Mac 项目配置阶段就需要 JDK 21；未配置自动下载 resolver，缺失时需先安装。
+可用 `./gradlew -q javaToolchains` 检查发现结果，非标准目录可用
+`-Dorg.gradle.java.installations.paths=<JDK17 home>,<JDK21 home>` 提供。
+
+```bash
+# 标准安装：无论 Gradle 自身用 Java 17、21 还是 25，Compose 都选择 Java 21
+./gradlew :desktop:verifyPackagedRuntime
+# 显式选择（使用本机安装路径；CI 使用 setup-java 的 outputs.path）
+YUNX_RUNTIME_JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./gradlew :desktop:packageDmg
+# 等价 Gradle 属性；优先于环境变量
+./gradlew :desktop:packageDmg -PruntimeJavaHome="$(/usr/libexec/java_home -v 21)"
+```
+
+`verifyPackagedRuntime` 依赖 `createDistributable`，读取实际 `.app/Contents/runtime/Contents/Home/release`
+并要求 `JAVA_VERSION` 主版本为 21。`packageDmg` 自动先执行该校验，再基于同一 app image 生成 DMG。
+单独运行 `createDistributable` 后也应执行此校验，不能只以 shell 的 `java -version` 判断产物。
+CI `release.yml` 显式安装 JDK 17 和 21，并传递运行时路径；Windows 的 `pr-portable.yml` 保留原 JDK 17 流程。
+
+这是 macOS 输入法 native 崩溃的运行时升级措施；中文输入、粘贴、切换输入法及焦点切换是否稳定，
+还需在用户实际 macOS/输入法环境中用新包验收。这里不将打包校验等同于崩溃已消除。
+
+## Windows 环境要求
 
 要求：Windows 10/11 x64。
 
