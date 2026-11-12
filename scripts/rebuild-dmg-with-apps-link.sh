@@ -17,11 +17,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKGROUND="$SCRIPT_DIR/dmg-background.png"
 [[ -f "$BACKGROUND" ]] || { echo "Missing background: $BACKGROUND" >&2; exit 1; }
 
-# Keep temporary output on the destination filesystem for atomic replacement.
-WORK=$(mktemp -d "$(dirname "$APP_DMG")/.yunx-dmg.XXXXXX")
+# Mount points and staging must live on the root filesystem: external volumes
+# are frequently mounted `nodev`, where hdiutil attach -mountpoint is denied.
+# Only the finished DMG stays next to the target, so the final swap is atomic.
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/yunx-dmg.XXXXXX")
 MOUNT="$WORK/mount"
 STAGE="$WORK/stage"
-TMP_DMG="$WORK/styled.dmg"
+TMP_DMG="$(dirname "$APP_DMG")/.yunx-styled.$$.dmg"
 MOUNTED=false
 cleanup() {
     local status=$?
@@ -33,6 +35,10 @@ cleanup() {
         fi
     fi
     rm -rf "$WORK"
+    # TMP_DMG lives beside the target (outside WORK); drop it on any non-success exit.
+    if [[ "$status" -ne 0 && -f "$TMP_DMG" ]]; then
+        rm -f "$TMP_DMG"
+    fi
     exit "$status"
 }
 trap cleanup EXIT
