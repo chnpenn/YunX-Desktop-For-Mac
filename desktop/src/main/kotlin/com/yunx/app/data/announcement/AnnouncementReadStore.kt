@@ -6,23 +6,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import java.util.prefs.Preferences
 
-/**
- * 已读公告的本地记录。
- *
- * 服务端**没有**已读接口（公开接口只有列表 / 最新 / 详情，详情只累加浏览量），
- * 所以「未读」口径完全由客户端维护：**打开详情** 或 **关掉启动弹窗** 都算已读。
- *
- * 存储：与桌面既有设置一致，用 `java.util.prefs`（落注册表）存一个 JSON 数组字符串
- * （最新的排最前），不落 SQLite —— 它只是「n 个 id 的集合」，没有查询需求。
- * 超过 [MAX_KEEP] 条时从尾部丢弃：公告 ID 不复用，丢掉很久以前的已读记录最多让一条
- * 陈年公告重新算作未读（角标数字会修正，不会丢数据）。
- *
- * 并发：写入方只有 ViewModel 一处，但读写可能跨线程（UI + 协程），用 [lock] 串行化，
- * 并且**先更新内存再落盘**，[readIds] 的订阅者（角标）不会被 IO 卡住。
- *
- * 桌面差异：上游用 `SharedPreferences`（Context 注入）；桌面无 Context，直接持有
- * `Preferences.userRoot().node("yunx/announcement")`，读写语义与键名一致。
- */
+/** 已读公告版本的本地记录；打开详情或关闭启动提示时保存，最多保留 500 项。 */
 class AnnouncementReadStore {
 
     private val prefs: Preferences = Preferences.userRoot().node("yunx/announcement")
@@ -96,5 +80,13 @@ class AnnouncementReadStore {
 
         /** 最多保留的已读记录条数（见类注释：多出来的从最旧的开始丢） */
         private const val MAX_KEEP = 500
+    }
+}
+
+/** 已确认的更高版本也覆盖旧版本，仓库回滚不会重新弹出旧公告。 */
+internal fun AnnouncementApi.Announcement.isRead(readKeys: Set<String>): Boolean {
+    val prefix = "git:$id@"
+    return readKeys.any { key ->
+        key.startsWith(prefix) && (key.removePrefix(prefix).toLongOrNull() ?: 0) >= version
     }
 }

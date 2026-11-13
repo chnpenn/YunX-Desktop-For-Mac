@@ -196,3 +196,10 @@ Get-ChildItem desktop\src\main\kotlin -Recurse -Filter *.kt | ForEach-Object {
 构建前运行 `export YUNX_RUNTIME_JAVA_HOME="$(bash scripts/setup-macos-runtime.sh)"`，
 使用经过行为对照的 JBR 运行时。运行时路径切换会使旧镜像失效；打包验证会实际执行包内输入法探针。
 候选范围、校验、离线光鸭表单和待验收项见 [mac-ime-crash.md](mac-ime-crash.md)。
+
+### Git 公告（1.3.6 起）
+
+公告直接读取本仓库 `mac-port` 分支的 `announcements/announcements.json`。
+每条公告使用独立的整数 `version`，不与应用版本比较；更新正文并递增版本后，下次启动重新提示。
+文件格式及发布步骤见 [公告维护说明](../announcements/README.md)。
+顶部公告按钮旁的“检查更新”按钮复用 GitHub Release 检查与下载流程，手动检查会反馈结果。

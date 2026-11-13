@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.announcement.AnnouncementApi
+import com.yunx.app.data.announcement.isRead
 import com.yunx.app.data.announcement.relativeTime
 import com.yunx.app.ui.components.RemoteImage
 import com.yunx.app.ui.GlobalSnackbarHost
@@ -119,7 +120,7 @@ fun AnnouncementListPage(
                     items(state.items, key = { it.id }) { item ->
                         AnnouncementRow(
                             item = item,
-                            unread = item.id !in readIds,
+                            unread = !item.isRead(readIds),
                             onClick = { onOpen(item) }
                         )
                     }

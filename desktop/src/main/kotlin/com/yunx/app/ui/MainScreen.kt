@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
@@ -245,6 +246,7 @@ fun MainScreen(
     var announcementDetailId by rememberSaveable { mutableStateOf<String?>(null) }
     /** 启动自动检查更新：发现新版本且未被用户忽略时非空 → 弹更新弹窗（见下方启动检查） */
     var startupUpdateRelease by remember { mutableStateOf<UpdateChecker.Release?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val scope = rememberCoroutineScope()
@@ -865,21 +867,34 @@ fun MainScreen(
      * 「不再提示该版本」写入的 `ignored_version`（按 tag 记住）与设置页手动检查时是同一个键，
      * 只跳过这一个版本，将来发布更新的版本仍会提示。
      */
-    LaunchedEffect(Unit) {
-        val release = runCatching {
-            UpdateChecker.fetchLatestRelease(settings.acceptPrereleaseUpdate)
-        }.getOrNull() ?: return@LaunchedEffect
-        val current = UpdateChecker.currentVersion()
-        if (UpdateChecker.compareVersions(release.tagName, current) <= 0) {
-            return@LaunchedEffect
+    fun checkForUpdates(manual: Boolean) {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        scope.launch {
+            try {
+                val release = try {
+                    UpdateChecker.fetchLatestRelease(settings.acceptPrereleaseUpdate)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) { null }
+                if (release == null) {
+                    if (manual) SnackbarController.show("检查更新失败，请检查网络")
+                    return@launch
+                }
+                val current = UpdateChecker.currentVersion()
+                if (UpdateChecker.compareVersions(release.tagName, current) <= 0) {
+                    if (manual) SnackbarController.show("已是最新版本")
+                    return@launch
+                }
+                if (!manual && !release.isMandatoryFor(current) &&
+                    AppContext.miscPrefs.get("ignored_version", null) == release.tagName) return@launch
+                startupUpdateRelease = release
+            } finally {
+                checkingUpdate = false
+            }
         }
-        // 强制更新不受「不再提示该版本」影响（用户之前忽略过也要拦）
-        val mandatory = release.isMandatoryFor(current)
-        if (!mandatory && AppContext.miscPrefs.get("ignored_version", null) == release.tagName) {
-            return@LaunchedEffect
-        }
-        startupUpdateRelease = release
     }
+    LaunchedEffect(Unit) { checkForUpdates(manual = false) }
 
     // 主框架与全屏覆盖层（关于页等）放在同一 Box：覆盖层带过渡动画
     Box(modifier = Modifier.fillMaxSize()) {
@@ -930,6 +945,13 @@ fun MainScreen(
                                     .align(Alignment.TopEnd)
                                     .offset(x = (-6).dp, y = 2.dp)
                             )
+                        }
+                    }
+                    IconButton(onClick = { checkForUpdates(manual = true) }, enabled = !checkingUpdate) {
+                        if (checkingUpdate) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Outlined.SystemUpdate, contentDescription = "检查更新")
                         }
                     }
                     // 解析页标题右上角：收藏网盘链接入口

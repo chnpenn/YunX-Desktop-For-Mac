@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.yunx.app.data.announcement.AnnouncementApi
 import com.yunx.app.data.announcement.AnnouncementReadStore
+import com.yunx.app.data.announcement.isRead
 import com.yunx.app.ui.SnackbarController
 import com.yunx.app.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +24,7 @@ import kotlin.reflect.KClass
  *
  * 数据源只有一份：启动检查 / 列表页 / 手动刷新 / 翻页都改同一个 [list]，
  * 所以「未读角标」的口径始终等于「已加载到的公告里未读的条数」——
- * 启动时用 [AnnouncementApi.PAGE_SIZE]（接口上限 100）一次取满，实际就是全部公告。
+ * 启动时展示首批 [AnnouncementApi.PAGE_SIZE] 条；文件完整快照供翻页和详情共用。
  *
  * 已读口径见 [AnnouncementReadStore]：**打开详情** 或 **关掉启动弹窗** 都算已读（服务端没有已读接口）。
  *
@@ -70,10 +71,10 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
 
     /** 顶栏红点角标的数字：已加载到的公告里未读的条数 */
     val unreadCount: StateFlow<Int> = combine(_list, readStore.readIds) { state, read ->
-        state.items.count { it.id.isNotEmpty() && it.id !in read }
+        state.items.count { it.id.isNotEmpty() && !it.isRead(read) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
-    /** 详情缓存：详情接口会让 viewCount +1，同一条公告在一次会话里只请求一次 */
+    /** 详情缓存：Git 文件含正文，同一条公告在一次会话里按 id 缓存 */
     private val detailCache = mutableMapOf<String, AnnouncementApi.Announcement>()
 
     private var startupChecked = false
@@ -114,13 +115,12 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
 
     /**
      * 手动刷新：重新拉第一页并覆盖列表。
-     * 详情缓存也一起作废：详情是按 id 缓存的（详情接口会让 viewCount +1，所以刻意不重复请求），
+     * 详情缓存也一起作废：详情是按 id 缓存的，
      * 只刷列表的话「服务端改了正文 → 刷新列表 → 再进详情」看到的还是旧内容。
      * 正在看的那条顺带重拉（列表刷新时它一般不可见，返回详情页时就已经是新数据）。
      */
     fun refresh() {
         detailCache.clear()
-        reloadCurrentDetail()
         loadFirstPage(refreshing = true)
     }
 
@@ -131,18 +131,19 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
      * 这里保留旧内容，拿到新数据再整体替换；失败只弹 Snackbar，不把已有内容换成错误页
      * （用户主动刷新失败时，旧内容仍然是有用的）。
      *
-     * 注意：详情接口会让 viewCount +1，所以主动刷新的代价是浏览量再 +1 —— 这是预期行为。
+     * 详情刷新重新读取 Git 文件，不记录浏览量。
      */
     fun reloadCurrentDetail() {
         val id = (_detail.value as? DetailUiState.Loaded)?.item?.id ?: return
         detailCache.remove(id)
         viewModelScope.launch {
-            when (val result = AnnouncementApi.fetchDetail(id)) {
+            when (val result = AnnouncementApi.fetchDetail(id, refresh = true)) {
                 is AnnouncementApi.Result.Failure ->
                     SnackbarController.show("公告刷新失败：${result.message}")
                 is AnnouncementApi.Result.Success -> {
                     val item = result.data
                     detailCache[id] = item
+                    readStore.markRead(item.readKey)
                     _detail.value = DetailUiState.Loaded(item)
                     backfillListItem(id, item)
                 }
@@ -162,6 +163,18 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
                 }
                 is AnnouncementApi.Result.Success -> {
                     val page = result.data
+                    val currentDetail = _detail.value as? DetailUiState.Loaded
+                    if (currentDetail != null) {
+                        when (val detail = AnnouncementApi.fetchDetail(currentDetail.item.id)) {
+                            is AnnouncementApi.Result.Success -> {
+                                detailCache[detail.data.id] = detail.data
+                                readStore.markRead(detail.data.readKey)
+                                _detail.value = DetailUiState.Loaded(detail.data)
+                            }
+                            is AnnouncementApi.Result.Failure -> _detail.value =
+                                DetailUiState.Failed(currentDetail.item.id, detail.message)
+                        }
+                    }
                     _list.update {
                         it.copy(
                             items = page.list,
@@ -213,7 +226,7 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
         if (trimmed.isEmpty()) return
         detailCache[trimmed]?.let { cached ->
             _detail.value = DetailUiState.Loaded(cached)
-            readStore.markRead(trimmed)
+            readStore.markRead(cached.readKey)
             return
         }
         val current = _detail.value
@@ -227,7 +240,7 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
                     detailCache[trimmed] = item
                     _detail.value = DetailUiState.Loaded(item)
                     // 打开详情即已读（已读口径完全由本地记录维护）
-                    readStore.markRead(trimmed)
+                    readStore.markRead(item.readKey)
                     backfillListItem(trimmed, item)
                 }
             }
@@ -235,7 +248,7 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
     }
 
     /**
-     * 用详情返回的数据回填列表项：详情里的浏览量是 +1 之后的真实值，回填后返回列表时数字是新的。
+     * 用详情返回的数据回填列表项，保持正文版本与未读状态一致。
      * （列表里没有这条时什么都不做 —— 比如从启动弹窗直接进详情时列表可能还没加载。）
      */
     private fun backfillListItem(id: String, item: AnnouncementApi.Announcement) {
@@ -257,31 +270,15 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
 
     /** 关掉启动弹窗（「知道了」/ 点空白）：标记已读，避免每次启动都被同一条置顶公告拦住 */
     fun consumePopup() {
-        _popup.value?.let { readStore.markRead(it.id) }
+        _popup.value?.let { readStore.markRead(it.readKey) }
         _popup.value = null
     }
 
     /** 「全部标为已读」：针对已加载到的公告（启动时一次取满 100 条，实际等于全部） */
     fun markAllRead() {
-        val count = readStore.markAllRead(_list.value.items.map { it.id })
+        val count = readStore.markAllRead(_list.value.items
+            .filterNot { it.isRead(readStore.readIds.value) }.map { it.readKey })
         SnackbarController.show(if (count > 0) "已将 $count 条公告标为已读" else "没有未读公告")
-    }
-
-    /**
-     * 启动弹窗候选（需求口径）：
-     * 1. 有**未读的置顶公告** → 取它（服务端已把置顶排在最前，组内按 sortOrder、publishAt 倒序，取第一条未读置顶即可）；
-     * 2. 否则取**最新的一条未读** —— 不能直接拿列表第一条：首条可能是「已读的置顶公告」，
-     *    这时「最新未读」应按生效时间（publishAt，缺失时 createdAt）取最大值；
-     * 3. 全部已读 → 不弹（null）。
-     */
-    private fun pickPopupCandidate(
-        items: List<AnnouncementApi.Announcement>,
-        read: Set<String>
-    ): AnnouncementApi.Announcement? {
-        val unread = items.filter { it.id.isNotEmpty() && it.id !in read }
-        if (unread.isEmpty()) return null
-        unread.firstOrNull { it.isPinned }?.let { return it }
-        return unread.maxByOrNull { it.effectiveMillis } ?: unread.first()
     }
 
     class Factory(private val readStore: AnnouncementReadStore) : ViewModelProvider.Factory {
@@ -295,4 +292,15 @@ class AnnouncementViewModel(private val readStore: AnnouncementReadStore) : View
     companion object {
         private const val TAG = "YunX-Announce"
     }
+}
+
+/** 启动时优先展示未读置顶公告，其次展示最新未读公告；相同或已确认的旧版本不再弹出。 */
+internal fun pickPopupCandidate(
+    items: List<AnnouncementApi.Announcement>,
+    read: Set<String>
+): AnnouncementApi.Announcement? {
+    val unread = items.filter { it.id.isNotEmpty() && !it.isRead(read) }
+    if (unread.isEmpty()) return null
+    unread.firstOrNull { it.isPinned }?.let { return it }
+    return unread.maxByOrNull { it.effectiveMillis } ?: unread.first()
 }

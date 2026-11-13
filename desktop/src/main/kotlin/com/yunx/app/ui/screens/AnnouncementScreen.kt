@@ -60,7 +60,7 @@ fun AnnouncementScreen(
 
     // 打开页面就有数据：启动检查成功过就直接用那份，不会再请求一次
     LaunchedEffect(Unit) { viewModel.ensureLoaded() }
-    // 进入详情页才请求详情（详情接口会让浏览量 +1，ViewModel 里按 id 缓存，同一会话只请求一次）
+    // 进入详情页读取正文快照；ViewModel 按 id 缓存，不记录浏览量。
     LaunchedEffect(detailId) { detailId?.let { viewModel.openDetail(it) } }
 
     // 返回键：详情页 → 列表页；列表页 → 关闭公告页（交回主界面）

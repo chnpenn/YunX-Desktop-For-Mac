@@ -63,7 +63,7 @@ import com.yunx.app.ui.viewmodel.AnnouncementViewModel
  * 刻意**不用 WebView** 渲染：`content` 支持 Markdown/HTML，进 WebView 就必须自己扛 XSS 与 CSP；
  * 走 Compose 渲染则 HTML 标签只是普通文本，不存在脚本执行面（代价是 HTML 片段不解析）。
  *
- * 详情接口会让 viewCount +1，所以 ViewModel 里按 id 缓存，本页重组 / 返回再进都不会重复请求。
+ * 正文来自 Git 文件快照；ViewModel 按 id 缓存，刷新时重新读取。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
