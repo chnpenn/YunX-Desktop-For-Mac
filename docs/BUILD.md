@@ -2,21 +2,21 @@
 
 > 概览见 [README](../README.md)
 
-## macOS arm64：编译 Java 17，打包运行时 Java 21
+## macOS arm64：编译、运行、打包统一 JDK 21
 
-Mac 移植版需要同时安装 **JDK 17 和 JDK 21**（含 `java`、`jlink`、`jpackage`）。
-`kotlin.jvmToolchain(17)` 保持不变，Kotlin/Java 字节码目标为 17；Compose 的
-`application.javaHome` 单独选择 JDK 21，用于开发运行、jlink 与 jpackage。
-不要通过修改 `jvmToolchain` 来升级发布包运行时。
+Mac 移植版只需安装 **JDK 21**（含 `java`、`javac`、`jlink`、`jpackage`）。
+`kotlin.jvmToolchain(21)` 让 Kotlin/Java 字节码目标统一为 21；Compose 的
+`application.javaHome` 显式选择同一个 JDK 21，用于开发运行、jlink 与 jpackage。
+不要降级 `jvmToolchain` 或让 Gradle 回退到 17/25 的 JDK 执行编译、测试和打包。
 
 选择顺序：`-PruntimeJavaHome=<JDK home>` → `YUNX_RUNTIME_JAVA_HOME` → Gradle 自动发现的已安装 JDK 21。
 覆盖值必须指向 JDK home（macOS 通常为 `*.jdk/Contents/Home`），版本不是 21、路径无效或缺少工具时直接失败，
 不会回退到运行 Gradle 的 JDK。Mac 项目配置阶段就需要 JDK 21；未配置自动下载 resolver，缺失时需先安装。
 可用 `./gradlew -q javaToolchains` 检查发现结果，非标准目录可用
-`-Dorg.gradle.java.installations.paths=<JDK17 home>,<JDK21 home>` 提供。
+`-Dorg.gradle.java.installations.paths=<JDK21 home>` 提供。
 
 ```bash
-# 标准安装：无论 Gradle 自身用 Java 17、21 还是 25，Compose 都选择 Java 21
+# 标准安装：Gradle 自身可用 JDK 21/25，但编译、测试、jlink、jpackage 都会选 JDK 21
 ./gradlew :desktop:verifyPackagedRuntime
 # 显式选择（使用本机安装路径；CI 使用 setup-java 的 outputs.path）
 YUNX_RUNTIME_JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./gradlew :desktop:packageDmg
@@ -27,10 +27,27 @@ YUNX_RUNTIME_JAVA_HOME="$(/usr/libexec/java_home -v 21)" ./gradlew :desktop:pack
 `verifyPackagedRuntime` 依赖 `createDistributable`，读取实际 `.app/Contents/runtime/Contents/Home/release`
 并要求 `JAVA_VERSION` 主版本为 21。`packageDmg` 自动先执行该校验，再基于同一 app image 生成 DMG。
 单独运行 `createDistributable` 后也应执行此校验，不能只以 shell 的 `java -version` 判断产物。
-CI `release.yml` 显式安装 JDK 17 和 21，并传递运行时路径；Windows 的 `pr-portable.yml` 保留原 JDK 17 流程。
+CI `release.yml` 只安装 JDK 21，并把它同时作为编译、测试、jlink 与 jpackage 的运行时；
+Windows 的 `pr-portable.yml` 与 `jdk-setup.ps1` 同样统一到 JDK 21。
 
 这是 macOS 输入法 native 崩溃的运行时升级措施；中文输入、粘贴、切换输入法及焦点切换是否稳定，
 还需在用户实际 macOS/输入法环境中用新包验收。这里不将打包校验等同于崩溃已消除。
+
+### macOS Java2D 渲染管线
+
+2026-11-13 的崩溃报告（`Java2D Queue Flusher`：`MTLPipelineStatesStorage` dealloc →
+`MTLContext` dealloc → `MTLGC_DestroyMTLGraphicsConfig` → `MTLRenderQueue_flushBuffer`）
+是 Java2D 的 Metal 管线问题，与上面的 AWTView/输入法 SIGTRAP 不是同一崩溃签名/路径
+（两者的底层缺陷根因均未证明）。
+macOS 的 `run` 与 jpackage 启动参数现统一注入 `-Dsun.java2d.metal=false`；
+`verifyPackagedRuntime` 除检查内嵌 Java 21 外，还读取实际
+`.app/Contents/app/YunX-Desktop.cfg`，要求 `java-options` 中恰有一条
+`-Dsun.java2d.metal=false`，且没有 `-Dsun.java2d.metal=true` / `-Dsun.java2d.opengl` 冲突项。
+
+该参数不是“已修复”的证明：JDK 21 `sun.java2d.MacOSFlags` 在 `metal=false` 时先选 OpenGL/CGL，
+若 `CGLGraphicsConfig.isCGLAvailable()` 为 false 仍会回退 Metal。因此验收需在实际运行中查看
+真实的 `GraphicsConfiguration`/surface 实现及线程栈，而不能只检查 property 或进程是否存活。
+Skiko 使用独立的 `skiko.renderApi`，本次没有关闭 Skiko/Chromium GPU，也没有更换运行时。
 
 ## Windows 环境要求
 
@@ -38,7 +55,7 @@ CI `release.yml` 显式安装 JDK 17 和 21，并传递运行时路径；Windows
 
 | 依赖 | 说明 |
 | --- | --- |
-| JDK 17 | 缺失时 `jdk-setup.ps1` 自动下载便携版 |
+| JDK 21 | 缺失时 `jdk-setup.ps1` 自动下载 Microsoft OpenJDK 21 便携版（严格校验主版本与 JDK 工具） |
 | Gradle | 由 wrapper 自动拉取，无需手动安装 |
 | **C++ 编译器** | 托盘菜单配色桥接层 `native/darkmode.cpp` 需编译为 `darkmode.dll`：优先 `cl.exe`（Visual Studio 2019/2022，勾选「使用 C++ 的桌面开发」工作负载），否则回退 `g++`（MinGW） |
 | Inno Setup 6 | 仅打安装包需要；缺失时脚本自动下载并静默安装 |
@@ -143,7 +160,7 @@ Beta=0           ← 第二行：Beta=1 预览版 / Beta=0 正式版（缺省 = 
 `Icons.Outlined/Filled/Rounded/AutoMirrored.*` 实际引用到的图标类（约 92 个）。
 
 新增图标时：**先在代码里直接写** `Icons.Outlined.Xxx`，如果编译报 `Unresolved reference`，说明裁剪包里没有，
-按下面步骤重新生成（PowerShell，JDK 17）：
+按下面步骤重新生成（PowerShell，JDK 21）：
 
 ```powershell
 # 1) 从源码收集引用到的图标类名

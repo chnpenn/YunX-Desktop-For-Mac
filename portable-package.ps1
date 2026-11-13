@@ -197,7 +197,7 @@ $runtimeTmp = Join-Path $root "release-runtime-tmp"
 # jlink 要求输出目录不存在，先清掉
 if (Test-Path $runtimeTmp) { Remove-Item $runtimeTmp -Recurse -Force }
 $jlinkExe = Join-Path $JDK "bin\jlink.exe"
-# --compress=2：对 runtime/lib/modules 做 zip 级别压缩（JDK 17 支持；JDK 21+ 才有的 zip-6 不可用）
+# --compress=2：JDK 21 下已标记过时但等价于 zip-6，继续用于压缩 runtime/lib/modules
 & $jlinkExe --module-path (Join-Path $JDK "jmods") `
   --add-modules java.base,java.datatransfer,java.xml,java.prefs,java.desktop,java.logging,jdk.crypto.ec,java.sql,java.naming,jdk.httpserver,jdk.unsupported.desktop `
   --strip-debug --no-header-files --no-man-pages --compress=2 --output $runtimeTmp

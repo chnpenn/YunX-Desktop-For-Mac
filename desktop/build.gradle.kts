@@ -36,7 +36,9 @@ dependencies {
     implementation(files("libs/material-color-utilities-1.0.0.jar"))
 
     // JavaFX MediaView 播放器（M6）：JFXPanel 经 SwingPanel 嵌入 Compose。
-    // 版本跟随 jvmToolchain(17)；Mac 移植改用 :mac-aarch64 classifier（jar 内含原生库，
+    // JavaFX 17.0.13 是独立的库版本，不随 JDK 主版本变化；四个模块必须保持同版本。
+    // JDK 21 toolchain/runtime 只做类加载与依赖兼容性验证，本次不升级 JavaFX。
+    // Mac 移植改用 :mac-aarch64 classifier（jar 内含原生库，
     // 首次运行由 JavaFX 自动解到用户目录缓存，jpackage 无需额外处理）
     implementation("org.openjfx:javafx-base:17.0.13:mac-aarch64")
     implementation("org.openjfx:javafx-graphics:17.0.13:mac-aarch64")
@@ -86,12 +88,12 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
-// macOS IME crash mitigation: compilation stays on 17, but Compose must use 21
-// for run/jlink/jpackage regardless of the Gradle daemon's JAVA_HOME (17/21/25).
-// Explicit paths support CI and nonstandard local installations; otherwise use
+// macOS runtime selection: the Kotlin/Java toolchain is JDK 21, but run/jlink/jpackage
+// must still select a JDK 21 home explicitly because the Gradle daemon/JAVA_HOME may be
+// 21 or 25. Explicit paths support CI and nonstandard installations; otherwise use
 // Gradle's installed-JDK discovery. Never silently package a daemon JDK instead.
 val onMac = System.getProperty("os.name", "").lowercase().contains("mac")
 val macRuntimeJavaHome = if (onMac) {
@@ -311,7 +313,12 @@ compose.desktop {
         // ★ 开发运行（gradle run）时菜单栏也显示「云析」：-Xdock:name 是 macOS JDK 专有
         //   选项，Windows/Linux 的 JVM 会报 Unrecognized option 直接拒绝启动，
         //   所以只在 mac 上构建/运行时才加（mac 包由下方 macOS.dockName 统一声明，二者同值）。
-        if (System.getProperty("os.name", "").lowercase().contains("mac")) {
+        if (onMac) {
+            // 2026-11-13 Java2D Metal 崩溃（Java2D Queue Flusher：MTLPipelineStatesStorage
+            // dealloc → MTLContext dealloc → MTLGC_DestroyMTLGraphicsConfig → MTLRenderQueue）。
+            // metal=false 让 MacOSFlags 选择 OpenGL/CGL；但 CGL 不可用时 JDK 仍会回退 Metal
+            // （sun.java2d.MacOSFlags.initJavaFlags），因此这不是"已消除"的保证。
+            jvmArgs("-Dsun.java2d.metal=false")
             jvmArgs("-Xdock:name=云析")
         }
         nativeDistributions {
@@ -361,7 +368,7 @@ compose.desktop {
 // consumes this same app image; fail before producing/distributing a wrong JRE.
 val verifyPackagedRuntime by tasks.registering {
     group = "verification"
-    description = "Verify macOS app image embeds Java 21 (compiler/toolchain remains 17)"
+    description = "Verify macOS app image embeds Java 21 (JDK 21 toolchain)"
     if (onMac) {
         dependsOn("createDistributable")
         doLast {
@@ -372,7 +379,25 @@ val verifyPackagedRuntime by tasks.registering {
             val metadata = Properties().apply { release.inputStream().use { load(it) } }
             val version = metadata.getProperty("JAVA_VERSION", "").trim('"')
             check(version.substringBefore('.') == "21") { "Packaged runtime must be Java 21, found '$version'" }
-            logger.lifecycle("Verified packaged runtime: Java $version ($release); Kotlin toolchain: Java 17")
+            // 崩溃缓解必须写进实际启动配置，而不是只存在于 Gradle 的 run 参数或文档里。
+            // 同时拒绝冲突项：metal 重复/为 true，或另设 opengl 参数改变 MacOSFlags 的管线选择。
+            val cfg = layout.buildDirectory.file(
+                "compose/binaries/main/app/YunX-Desktop.app/Contents/app/YunX-Desktop.cfg"
+            ).get().asFile
+            check(cfg.isFile) { "Packaged app cfg missing: $cfg" }
+            val javaOptions = cfg.readLines()
+                .filter { it.startsWith("java-options=") }
+                .map { it.removePrefix("java-options=") }
+            val metalOptions = javaOptions.filter { it.startsWith("-Dsun.java2d.metal") }
+            check(metalOptions == listOf("-Dsun.java2d.metal=false")) {
+                "Packaged cfg must contain exactly one -Dsun.java2d.metal=false, found: $metalOptions"
+            }
+            check(javaOptions.none { it.startsWith("-Dsun.java2d.opengl") }) {
+                "Packaged cfg sets -Dsun.java2d.opengl, conflicting with the Metal opt-out: " +
+                    javaOptions.filter { it.startsWith("-Dsun.java2d.opengl") }
+            }
+            logger.lifecycle("Verified packaged runtime: Java $version ($release); Kotlin toolchain: Java 21")
+            logger.lifecycle("Verified packaged Java2D opt-out: -Dsun.java2d.metal=false ($cfg)")
         }
     } else {
         onlyIf { false }

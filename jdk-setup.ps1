@@ -1,31 +1,45 @@
 ﻿# YunX-Desktop 共享构建工具脚本（被 run.ps1 和 portable-package.ps1 引用）
-# 提供：JDK 17 定位/自动安装（Ensure-Jdk）、Gradle 调用（Invoke-Gradle，直调 wrapper jar，不再依赖 gradlew.bat）
+# 提供：JDK 21 定位/自动安装（Ensure-Jdk）、Gradle 调用（Invoke-Gradle，直调 wrapper jar，不再依赖 gradlew.bat）
 # 注意: 本文件必须保持 UTF-8 带 BOM 编码（PS 5.1 会把无 BOM 的 UTF-8 当 ANSI 解析，中文注释变乱码）
+
+function Test-Jdk21 {
+    param([string]$JdkHome, [switch]$RequireJPackage)
+    if (-not $JdkHome) { return $false }
+    $tools = @("java", "javac", "jlink")
+    if ($RequireJPackage) { $tools += "jpackage" }
+    foreach ($tool in $tools) {
+        if (-not (Test-Path (Join-Path $JdkHome "bin\$tool.exe"))) { return $false }
+    }
+    $release = Join-Path $JdkHome "release"
+    if (-not (Test-Path $release)) { return $false }
+    $versionLine = Select-String -Path $release -Pattern '^JAVA_VERSION="?(\d+)' | Select-Object -First 1
+    if (-not $versionLine) { return $false }
+    return $versionLine.Matches[0].Groups[1].Value -eq "21"
+}
 
 function Find-JdkHome {
     param([switch]$RequireJPackage)
-    $marker = if ($RequireJPackage) { "bin\jpackage.exe" } else { "bin\java.exe" }
 
     $candidates = @(
-        "C:\Program Files\Microsoft\jdk-17*",
-        "C:\Program Files\Java\jdk-17*",
-        "C:\Program Files\Eclipse Adoptium\jdk-17*",
-        "C:\Program Files\Eclipse Foundation\jdk-17*",
-        "C:\Program Files\Zulu\zulu-17*",
-        "C:\Program Files\Amazon Corretto\jdk-17*",
-        (Join-Path $env:LOCALAPPDATA "jdk-portable\jdk-17*"),
-        (Join-Path $PSScriptRoot ".jdk\jdk-17*")
+        "C:\Program Files\Microsoft\jdk-21*",
+        "C:\Program Files\Java\jdk-21*",
+        "C:\Program Files\Eclipse Adoptium\jdk-21*",
+        "C:\Program Files\Eclipse Foundation\jdk-21*",
+        "C:\Program Files\Zulu\zulu-21*",
+        "C:\Program Files\Amazon Corretto\jdk-21*",
+        (Join-Path $env:LOCALAPPDATA "jdk-portable\jdk-21*"),
+        (Join-Path $PSScriptRoot ".jdk\jdk-21*")
     )
     foreach ($c in $candidates) {
         try {
             $resolved = Resolve-Path $c -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($resolved -and (Test-Path (Join-Path $resolved.Path $marker))) {
+            if ($resolved -and (Test-Jdk21 -JdkHome $resolved.Path -RequireJPackage:$RequireJPackage)) {
                 return $resolved.Path
             }
         } catch {}
     }
 
-    if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME $marker))) {
+    if ($env:JAVA_HOME -and (Test-Jdk21 -JdkHome $env:JAVA_HOME -RequireJPackage:$RequireJPackage)) {
         return $env:JAVA_HOME
     }
 
@@ -36,7 +50,7 @@ function Find-JdkHome {
                 Select-String "java.home" |
                 ForEach-Object { $_.Line -replace ".*= ", "" } |
                 Select-Object -First 1)
-            if ($javaHome -and (Test-Path (Join-Path $javaHome $marker))) {
+            if ($javaHome -and (Test-Jdk21 -JdkHome $javaHome -RequireJPackage:$RequireJPackage)) {
                 return $javaHome
             }
         } catch {}
@@ -44,13 +58,16 @@ function Find-JdkHome {
     return $null
 }
 
-function Install-PortableJDK17 {
-    Write-Host "[!] No JDK 17 found. Downloading portable Microsoft OpenJDK 17..." -ForegroundColor Yellow
+function Install-PortableJDK21 {
+    param([switch]$RequireJPackage)
+    Write-Host "[!] No JDK 21 found. Downloading portable Microsoft OpenJDK 21..." -ForegroundColor Yellow
     $installDir = Join-Path $env:LOCALAPPDATA "jdk-portable"
     if (-not (Test-Path $installDir)) { New-Item -ItemType Directory -Path $installDir -Force | Out-Null }
 
-    $jdkZipUrl = "https://aka.ms/download-jdk/microsoft-jdk-17.0.14-windows-x64.zip"
-    $jdkZipPath = Join-Path $installDir "jdk-17.zip"
+    # Official major-version URL:
+    # https://learn.microsoft.com/en-us/java/openjdk/download-major-urls
+    $jdkZipUrl = "https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip"
+    $jdkZipPath = Join-Path $installDir "jdk-21.zip"
 
     Write-Host "    Downloading from: $jdkZipUrl" -ForegroundColor Gray
     Write-Host "    Saving to: $jdkZipPath" -ForegroundColor Gray
@@ -67,12 +84,12 @@ function Install-PortableJDK17 {
     Expand-Archive -Path $jdkZipPath -DestinationPath $installDir -Force
     Remove-Item $jdkZipPath -Force -ErrorAction SilentlyContinue
 
-    $extracted = Get-ChildItem $installDir -Directory -Filter "jdk-17*" | Select-Object -First 1
+    $extracted = Get-ChildItem $installDir -Directory -Filter "jdk-21*" | Select-Object -First 1
     if (-not $extracted) {
-        throw "JDK extraction failed - no jdk-17 folder found in $installDir"
+        throw "JDK extraction failed - no jdk-21 folder found in $installDir"
     }
-    if (-not (Test-Path (Join-Path $extracted.FullName "bin\java.exe"))) {
-        throw "JDK extraction failed - no java.exe found"
+    if (-not (Test-Jdk21 -JdkHome $extracted.FullName -RequireJPackage:$RequireJPackage)) {
+        throw "Extracted JDK failed version/tool check (expected JDK 21): $($extracted.FullName)"
     }
 
     Write-Host "[OK] Portable JDK installed: $($extracted.FullName)" -ForegroundColor Green
@@ -83,7 +100,7 @@ function Ensure-Jdk {
     param([switch]$RequireJPackage)
     $jdkHome = Find-JdkHome -RequireJPackage:$RequireJPackage
     if (-not $jdkHome) {
-        $jdkHome = Install-PortableJDK17
+        $jdkHome = Install-PortableJDK21 -RequireJPackage:$RequireJPackage
     }
     $env:JAVA_HOME = $jdkHome
     $env:PATH = "$jdkHome\bin;$env:PATH"

@@ -5,7 +5,7 @@
 > 构建命令：`/Users/penn/.gradle/wrapper/dists/gradle-8.13-bin/5xuhj0ry160q40clulazy9h7d/gradle-8.13/bin/gradle :desktop:packageDmg`
 > DMG 自动产出到 `desktop/build/compose/binaries/main/dmg/` 并复制到 `~/Downloads/`
 > 运行日志：`~/.yunx-desktop/files/yunx-desktop.log`
-> 技术栈：Kotlin + Compose Multiplatform 1.7.3（Desktop/JVM）+ JCEF 132.3.1 + JNA 5.14，jpackage 打包（未签名），编译工具链 Java 17 / macOS 打包运行时显式选择 JDK 21 / CI macos-14
+> 技术栈：Kotlin + Compose Multiplatform 1.7.3（Desktop/JVM）+ JCEF 132.3.1 + JNA 5.14，jpackage 打包（未签名），编译/测试/运行/打包统一 JDK 21（字节码 21）/ CI macos-14
 
 ---
 
@@ -83,7 +83,45 @@ UC 网盘单个视频文件分享曾报错，文件夹分享正常。此前分�
 
 ---
 
-## 问题 3：应用意外闪退（崩溃报告 4 份，同一根因）
+## 问题 3：应用意外闪退（输入法与 Java2D Metal 两类崩溃）
+
+> 本节主体记录的是 2026-11-11 的 AWTView/输入法 SIGTRAP。2026-11-13 又收到一份**不同崩溃签名/路径**的
+> Java2D Metal 崩溃，见下面第一小节；不要把 2026-11-11 的 JDK 21 升级或旧补丁对应关系当作它的解释。
+
+### 2026-11-13 新增：Java2D Metal 崩溃（与输入法 SIGTRAP 不同崩溃签名/路径）
+
+- 报告：`/Users/penn/Library/Application Support/orca/agent-session-attachments/f11a5891-6373-4f2f-939d-b1e72ef31c4e/orca-paste-1794535856937-908d9832-446c-4336-a9de-0fcbdbabb15c.txt`
+- 时间/进程：2026-11-13 10:03:43，`YunX-Desktop` 1.3.3（安装包内嵌 Java 21.0.8），崩溃前运行约 28 分钟。
+- 崩溃：`EXC_BAD_ACCESS (SIGABRT)`，Thread 36 `Java: Java2D Queue Flusher`：
+  `MTLPipelineStatesStorage dealloc` → `MTLContext dealloc` → `MTLGC_DestroyMTLGraphicsConfig` →
+  `MTLRenderQueue_flushBuffer`。这是 Java2D 的 Metal 管线，不是 `AWTView selectedRange`。
+- 现场限制：未找到对应 `hs_err`；应用日志显示 JCEF 初始化成功，且“上次未正常退出”记录不能证明 JCEF 是根因。
+- 缓解（未证明根除）：macOS 的 run/jpackage 启动参数加 `-Dsun.java2d.metal=false`，让
+  `sun.java2d.MacOSFlags` 选 OpenGL/CGL。JDK 源码明确：`CGLGraphicsConfig.isCGLAvailable()` 为 false 时
+  仍会回退 Metal，因此必须用实际运行证据（GraphicsConfiguration/surface 类、线程栈）验收。
+  Skiko 的 `skiko.renderApi` 独立，本次不关闭 Skiko/Chromium GPU，不更换 JDK 21，也不升级 Compose/JCEF。
+- 边界：没有刻意制造堆破坏复现；不能据此宣称 28 分钟量级的长期故障已消除，需新包在实际使用中观察是否仍出现 MTL 栈。
+
+### 2026-11-13 后续：构建、测试、运行、打包统一 JDK 21
+
+- 当前 `kotlin.jvmToolchain(21)`，Kotlin/Java 字节码目标为 21；macOS 仍保留
+  `-PruntimeJavaHome` / `YUNX_RUNTIME_JAVA_HOME` / 自动发现 JDK 21 的选择与
+  `release` 主版本、`java/javac/jlink/jpackage` 校验，`-Dsun.java2d.metal=false` 保留。
+- `release.yml` 只安装 JDK 21，并同时作为编译、测试、jlink、jpackage 运行时；
+  `pr-portable.yml` 与 Windows `jdk-setup.ps1`/`run.ps1` 同步到 21。`jdk-setup.ps1`
+  以 `release` 的 `JAVA_VERSION` 强制主版本 21，并检查 java/javac/jlink（打包时另查 jpackage），
+  避免仅有 JRE 或 17/25 被误用；固定下载地址为 Microsoft 官方
+  `https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip`。
+- JavaFX 仍为独立的 17.0.13 四个模块，本次只做类加载验证，不代表视频播放通过；
+  Compose/Skiko/JCEF 未升级。
+- 本轮验证：JDK 21 执行 Gradle 8.13，强制重编译后 `MainKt` 与代表性测试类均为
+  `major version: 65`；测试 worker 实际命令使用 `jdk-21.jdk`；21 类 / 91 个自动化测试通过；
+  `verifyPackagedRuntime` 内嵌 Java 21.0.8 且 cfg 含唯一 `-Dsun.java2d.metal=false`。
+  打包 launcher smoke：100 轮 AWT 均为 CGLGraphicsConfig、无 MTL Java 帧；3 轮 Compose 窗口内
+  JCEF 本地 HTTP 200 加载/关闭全部成功（wall 16.13s）。JavaFX `Scene/Media/MediaPlayer/MediaView/JFXPanel`
+  仅 `Class.forName(load-only)` 通过，未启动 JavaFX toolkit、未播放。
+- 本文件 2026-11-11 的 JDK 17 编译/打包证据保留为历史记录；它不再描述当前构建配置。
+  Windows PowerShell 新逻辑已静态核对调用名/引用，但未在本机执行；统一字节码 21 也不等于 Metal 崩溃根除。
 
 ### 崩溃签名（~/Library/Logs/DiagnosticReports/YunX-Desktop-2026-11-11-{163338,185815,190454,193355,200229,202103}.ips，共 6 份，栈完全一致）
 
@@ -157,7 +195,7 @@ Exception Type:  EXC_BREAKPOINT (SIGTRAP)
 |---|---|
 | 构建命令 | `/Users/penn/.gradle/wrapper/dists/gradle-8.13-bin/5xuhj0ry160q40clulazy9h7d/gradle-8.13/bin/gradle :desktop:packageDmg` |
 | DMG 输出 | `desktop/build/compose/binaries/main/dmg/YunX-Desktop-1.3.3.dmg` → 自动复制 `~/Downloads/` |
-| 测试前必须 | `pkill -9 -f "YunX-Desktop.app"` + `rm -f ~/.yunx-desktop/yunx-instance.lock`（单实例锁会让新启动复用旧进程） |
+| 测试/冒烟前必须 | 隔离 `YUNX_DESKTOP_DATA_DIR`、`-Djava.util.prefs.userRoot`、`-Duser.home`、私有 tmp；**不要** `pkill` 用户正在使用的 YunX-Desktop，也不要删除真实数据/锁。单实例锁只会在隔离数据目录内生效 |
 | 运行日志 | `~/.yunx-desktop/files/yunx-desktop.log`（诊断标签 YunX-ClickDiag / YunX-DL / GopeedEngine） |
 | 崩溃报告 | `~/Library/Logs/DiagnosticReports/YunX-Desktop-*.ips` |
 | 可用 JDK | 17.0.16 / 21.0.8 / 25（`/Library/Java/JavaVirtualMachines/`） |

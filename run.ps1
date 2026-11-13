@@ -19,7 +19,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 Write-Host "Working directory: $root" -ForegroundColor Cyan
 
-# 共享 JDK 逻辑：找到已装的 JDK 17，没有则自动下载便携版，新机器无需配环境变量
+# 共享 JDK 逻辑：找到已装的 JDK 21（严格校验主版本与 JDK 工具），没有则自动下载便携版
 . (Join-Path $root "jdk-setup.ps1")
 $javaHome = Ensure-Jdk
 
