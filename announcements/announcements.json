@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "announcements": [
+    {
+      "id": "macos-announcements",
+      "version": 1,
+      "title": "公告与更新入口调整",
+      "summary": "公告已迁移到 Git 仓库，顶部新增检查更新按钮。",
+      "content": "## 公告服务已迁移\n\n公告现在直接从本项目 Git 仓库读取，不再依赖原公告服务器。公告更新后，下次启动会显示新内容。\n\n## 手动检查更新\n\n点击顶部公告图标旁的检查更新按钮，即可检查软件新版本。\n\nPixiv 和光鸭入口暂时隐藏，已有账号数据保留。",
+      "author": "云析 macOS",
+      "publishAt": "2026-11-13T13:00:00Z",
+      "isPinned": true
+    }
+  ]
+}
