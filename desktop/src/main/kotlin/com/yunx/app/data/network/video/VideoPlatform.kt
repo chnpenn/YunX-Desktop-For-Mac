@@ -90,7 +90,7 @@ enum class VideoPlatform(
         // ★ 桌面差异：上游因为移动 WebView 过不了 reCAPTCHA Enterprise，只提供「手动填 Cookie」。
         //   桌面 JCEF 是完整的桌面 Chromium（UA / 指纹 / navigator.webdriver 均正常），
         //   这里尝试直接网页登录；若仍被风控拦下，登录页仍可一键切到手动粘贴（见 VideoLoginScreen）。
-        loginUrl = "https://accounts.pixiv.net/login.php",
+        loginUrl = "https://accounts.pixiv.net/login",
         cookieDomain = "pixiv.net",
         loginBenefit = "登录后可解析全部作品（含 R18 与受限作品）；未登录只能拿到一部分公开作品",
         manualCookieOnly = false

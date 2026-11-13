@@ -1,0 +1,15 @@
+// Use with -I scripts/diagnostics/isolated-tests.gradle.
+allprojects {
+    tasks.withType(Test).configureEach {
+        // This manual test reads real browser cookies and is not a hermetic test.
+        filter { excludeTestsMatching 'com.yunx.app.util.BrowserCookieImportMacTest' }
+        def sandbox = layout.buildDirectory.dir('isolated-tests').get().asFile
+        systemProperty 'user.home', new File(sandbox, 'home').absolutePath
+        systemProperty 'java.io.tmpdir', new File(sandbox, 'tmp').absolutePath
+        systemProperty 'java.util.prefs.PreferencesFactory', 'com.yunx.app.diagnostics.MemoryPreferencesFactory'
+        environment 'YUNX_DESKTOP_DATA_DIR', new File(sandbox, 'data').absolutePath
+        doFirst {
+            ['home', 'tmp', 'data'].each { new File(sandbox, it).mkdirs() }
+        }
+    }
+}

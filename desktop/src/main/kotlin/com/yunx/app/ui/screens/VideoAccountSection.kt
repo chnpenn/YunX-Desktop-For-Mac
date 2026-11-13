@@ -47,7 +47,8 @@ internal fun VideoAccountSection(
     onManage: (VideoPlatform) -> Unit,
     columns: Int = 1
 ) {
-    val platforms = remember { VideoParsers.supportedPlatforms }
+    // 暂时隐藏 Pixiv 入口，保留已有账号数据和解析实现。
+    val platforms = remember { VideoParsers.supportedPlatforms.filterNot { it == VideoPlatform.PIXIV } }
     // 每个平台已登录的账号数：只有多账号时才需要在状态里补「共 N 个账号」
     val counts = remember(accounts) { accounts.groupingBy { it.platform }.eachCount() }
 

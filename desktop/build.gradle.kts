@@ -117,6 +117,47 @@ val macRuntimeJavaHome = if (onMac) {
     home.absolutePath
 } else null
 
+// A Java major-version check alone cannot catch the macOS IME null-focus crash.
+// Check the selected runtime's behaviour before producing an application image.
+val verifyMacImeRuntime by tasks.registering(Exec::class) {
+    group = "verification"
+    description = "Reject macOS runtimes that throw from an inactive IME selectedRange callback"
+    onlyIf { onMac }
+    if (onMac) {
+        commandLine(
+            "$macRuntimeJavaHome/bin/java",
+            "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
+            rootProject.file("scripts/diagnostics/InactiveInputMethodProbe.java").absolutePath
+        )
+    }
+}
+
+tasks.register<JavaExec>("runGuangYaImeDiagnostic") {
+    group = "verification"
+    description = "Open the real GuangYa form with in-memory accounts and offline HTTP responses"
+    dependsOn("testClasses")
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.yunx.app.diagnostics.GuangYaImeProbeKt")
+    if (onMac) executable = "$macRuntimeJavaHome/bin/java"
+    jvmArgs("-Dsun.java2d.metal=false", "--add-opens=java.desktop/sun.awt.im=ALL-UNNAMED",
+        "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED")
+    systemProperty("java.util.prefs.PreferencesFactory", "com.yunx.app.diagnostics.MemoryPreferencesFactory")
+    systemProperty("yunx.ime.probeInactiveSelection", providers.gradleProperty("probeInactiveSelection").orElse("false").get())
+    environment("YUNX_DESKTOP_DATA_DIR", layout.buildDirectory.dir("ime-diagnostic-data").get().asFile)
+    environment("JNU_APPKIT_TRACE", "1")
+}
+
+tasks.matching { it.name == "createRuntimeImage" || it.name == "run" }.configureEach {
+    dependsOn(verifyMacImeRuntime)
+}
+// Compose 1.7.3 can otherwise reuse the previous runtime image after javaHome changes.
+tasks.matching { it.name == "createRuntimeImage" || it.name == "createDistributable" }.configureEach {
+    if (onMac) {
+        inputs.property("yunxRuntimeHome", macRuntimeJavaHome!!)
+        inputs.file(file(macRuntimeJavaHome).resolve("release"))
+    }
+}
+
 // ---- 版本号单一来源：仓库根目录 version.txt（jpackage / 便携包 / 安装包 / 应用内版本全部由它派生）----
 // 格式：第一行版本号（如 1.3.1）；第二行 Beta=1 / Beta=0（1=预览版，0 或缺省=正式版）
 val versionLines = rootProject.file("version.txt").readLines().map { it.trim() }.filter { it.isNotEmpty() }
@@ -379,6 +420,20 @@ val verifyPackagedRuntime by tasks.registering {
             val metadata = Properties().apply { release.inputStream().use { load(it) } }
             val version = metadata.getProperty("JAVA_VERSION", "").trim('"')
             check(version.substringBefore('.') == "21") { "Packaged runtime must be Java 21, found '$version'" }
+            val selected = Properties().apply {
+                file(macRuntimeJavaHome!!).resolve("release").inputStream().use { load(it) }
+            }
+            // jlink strips vendor/source metadata from release; compare the version here
+            // and execute the regression probe inside the actual packaged runtime below.
+            check(metadata.getProperty("JAVA_VERSION") == selected.getProperty("JAVA_VERSION")) {
+                "Packaged runtime differs from the verified runtime; rebuild createRuntimeImage: " +
+                    "packaged=$version, selected=${selected.getProperty("JAVA_VERSION")}"
+            }
+            exec {
+                commandLine("python3", rootProject.file("scripts/diagnostics/verify-packaged-ime.py"),
+                    layout.buildDirectory.dir("compose/binaries/main/app/YunX-Desktop.app").get().asFile,
+                    macRuntimeJavaHome!!)
+            }
             // 崩溃缓解必须写进实际启动配置，而不是只存在于 Gradle 的 run 参数或文档里。
             // 同时拒绝冲突项：metal 重复/为 true，或另设 opengl 参数改变 MacOSFlags 的管线选择。
             val cfg = layout.buildDirectory.file(

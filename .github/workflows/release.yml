@@ -20,15 +20,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install the single toolchain explicitly; Gradle does not have a JDK
-      # download resolver configured. The same JDK 21 is compiler, test,
-      # jlink and jpackage runtime (setup-java sets JAVA_HOME).
+      # Compilation remains Java 21; packaging uses the IME-verified JBR below.
       - name: Set up JDK 21
         id: java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Set up macOS runtime with IME lifecycle fix
+        run: |
+          runtime_home=$(bash scripts/setup-macos-runtime.sh)
+          echo "YUNX_RUNTIME_JAVA_HOME=$runtime_home" >> "$GITHUB_ENV"
 
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
@@ -38,10 +41,8 @@ jobs:
         run: brew install create-dmg
 
       - name: Build DMG
-        env:
-          YUNX_RUNTIME_JAVA_HOME: ${{ steps.java.outputs.path }}
-          # 严格模式（默认）：样式化失败 = 构建失败，绝不发布裸盘 DMG。
-          # 若 CI 的 create-dmg/Finder 自动化不可用，改为本地打包上传发布。
+        # 严格模式（默认）：样式化失败 = 构建失败，绝不发布裸盘 DMG。
+        # 若 CI 的 create-dmg/Finder 自动化不可用，改为本地打包上传发布。
         run: ./gradlew :desktop:packageDmg --no-daemon
         # packageDmg 验证 app 内嵌 Java 21，再美化 DMG、复制到 Downloads。
         # （补 Applications 快捷方式），产物在 desktop/build/compose/binaries/main/dmg/

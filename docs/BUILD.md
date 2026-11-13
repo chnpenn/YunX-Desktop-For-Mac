@@ -189,3 +189,10 @@ Get-ChildItem desktop\src\main\kotlin -Recurse -Filter *.kt | ForEach-Object {
 | `launcher/` | 自研启动器（C# 编译为无控制台窗口的 exe；固定读取 `app\YunX-Desktop.cfg`，改 exe 名或放在中文路径下都不会失效，同时负责启动闪屏与主窗口交叉淡入） |
 | `installer/` | Inno Setup 脚本与中文语言包 |
 | `docs/` | 文档（见 [README](../README.md#文档)） |
+
+### macOS 输入法运行时门槛（2026-11-13）
+
+普通 JDK 21 的版本检查不足以避免 `AWTView selectedRange` 闪退。
+构建前运行 `export YUNX_RUNTIME_JAVA_HOME="$(bash scripts/setup-macos-runtime.sh)"`，
+使用经过行为对照的 JBR 运行时。运行时路径切换会使旧镜像失效；打包验证会实际执行包内输入法探针。
+候选范围、校验、离线光鸭表单和待验收项见 [mac-ime-crash.md](mac-ime-crash.md)。

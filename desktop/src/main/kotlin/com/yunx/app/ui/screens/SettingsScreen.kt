@@ -122,7 +122,6 @@ private val threadPlatformSections = listOf(
             ThreadPlatform(DownloadPlatform.C139, "139 网盘"),
             ThreadPlatform(DownloadPlatform.PAN123, "123 云盘"),
             ThreadPlatform(DownloadPlatform.PAN115, "115 网盘"),
-            ThreadPlatform(DownloadPlatform.GUANGYA, "光鸭云盘"),
             ThreadPlatform(DownloadPlatform.ILANZOU, "蓝奏云优享版"),
             ThreadPlatform(DownloadPlatform.LANZOU, "蓝奏云"),
         )
@@ -136,7 +135,6 @@ private val threadPlatformSections = listOf(
             ThreadPlatform(DownloadPlatform.VIDEO_WEIBO, "微博"),
             ThreadPlatform(DownloadPlatform.VIDEO_XHS, "小红书"),
             ThreadPlatform(DownloadPlatform.VIDEO_ACFUN, "AcFun"),
-            ThreadPlatform(DownloadPlatform.VIDEO_PIXIV, "Pixiv"),
         )
     ),
     ThreadPlatformSection(

@@ -41,8 +41,8 @@ class GuangYaAccountViewModel(
         if (account.isBlank() || password.isBlank()) {
             false to "请输入光鸭账号和密码"
         } else {
-            val result = repository.login(account, password, newAccount = addNewAccount)
-            if (result.isSuccess) addNewAccount = false
+            repository.login(account, password, newAccount = addNewAccount).getOrThrow()
+            addNewAccount = false
             true to "登录成功"
         }
     } catch (e: Exception) {
@@ -81,14 +81,14 @@ class GuangYaAccountViewModel(
         } else if (code.isBlank()) {
             false to "请输入验证码"
         } else {
-            val result = repository.smsLogin(
+            repository.smsLogin(
                 phoneNumber,
                 verificationId,
                 code,
                 isUser,
                 newAccount = addNewAccount
-            )
-            if (result.isSuccess) addNewAccount = false
+            ).getOrThrow()
+            addNewAccount = false
             true to "登录成功"
         }
     } catch (e: Exception) {

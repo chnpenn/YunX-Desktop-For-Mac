@@ -270,13 +270,6 @@ fun DriveScreen(
         avatarText = "115",
         isLoggedIn = pan115Account != null
     )
-    val guangya = DriveAccount(
-        id = "guangya",
-        name = "光鸭云盘",
-        description = guangyaAccount?.nickname?.let { maskAccountText(it) } ?: "点击登录，支持解析下载",
-        avatarText = "光",
-        isLoggedIn = guangyaAccount != null
-    )
     val ilanzou = DriveAccount(
         id = "ilanzou",
         name = "蓝奏云优享版",
@@ -514,22 +507,6 @@ fun DriveScreen(
                         },
                         onMoreClick = if (pan115.isLoggedIn) {
                             { showPan115Sheet = true }
-                        } else {
-                            null
-                        }
-                    )
-                }
-                item(key = guangya.id) {
-                    DriveAccountCard(
-                        account = guangya,
-                        quota = driveQuotaViewModel.guangyaQuota.collectAsState().value,
-                        onClick = if (guangya.isLoggedIn) {
-                            { showGuangYaCloud = true }
-                        } else {
-                            onGuangYaLogin
-                        },
-                        onMoreClick = if (guangya.isLoggedIn) {
-                            { showGuangYaSheet = true }
                         } else {
                             null
                         }
