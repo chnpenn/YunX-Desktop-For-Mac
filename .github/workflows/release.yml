@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-14          # Apple Silicon runner，与发布目标（arm64 原生）一致
+    runs-on: macos-15          # Apple Silicon runner，与发布目标（arm64 原生）一致（macos-14 已于 2026 退役）
     timeout-minutes: 45
     steps:
       - name: Checkout
