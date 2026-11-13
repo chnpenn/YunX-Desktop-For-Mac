@@ -33,9 +33,16 @@ jobs:
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
+      # runner 镜像不含 create-dmg（样式脚本硬依赖，缺失会在 1s 内失败）
+      - name: Install create-dmg
+        run: brew install create-dmg
+
       - name: Build DMG
         env:
           YUNX_RUNTIME_JAVA_HOME: ${{ steps.java.outputs.path }}
+          # CI 上若 create-dmg 的 AppleScript/Finder 交互失败，降级为默认布局
+          # （仍含 Applications 链接，可安装）；本地默认严格模式不受影响。
+          YUNX_DMG_STRICT: '0'
         run: ./gradlew :desktop:packageDmg --no-daemon
         # packageDmg 验证 app 内嵌 Java 21，再美化 DMG、复制到 Downloads。
         # （补 Applications 快捷方式），产物在 desktop/build/compose/binaries/main/dmg/
